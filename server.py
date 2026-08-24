@@ -807,11 +807,25 @@ def api_document_paperless(doc_id: int):
             if poll.status_code != 200:
                 continue
             tasks_data = poll.json()
-            # Antwort kann Liste oder einzelnes Objekt sein
-            entry = tasks_data[0] if isinstance(tasks_data, list) and tasks_data else tasks_data
-            if isinstance(entry, dict) and entry.get("status") == "SUCCESS":
-                pl_doc_id = entry.get("related_document")
+            # Paperless liefert eine (ungefilterte) LISTE von Task-Einträgen —
+            # den passenden Eintrag über die exakte task_id suchen, nicht [0] nehmen.
+            entries = tasks_data if isinstance(tasks_data, list) else [tasks_data]
+            match = None
+            for entry in entries:
+                if isinstance(entry, dict) and entry.get("task_id") == task_id:
+                    match = entry
+                    break
+            if match is None:
+                continue
+            status = match.get("status")
+            if status == "SUCCESS":
+                pl_doc_id = match.get("related_document")
                 break
+            if status in ("FAILURE", "REVOKED"):
+                detail = (match.get("result") or "")[:300]
+                return _err(
+                    f"Paperless konnte das Dokument nicht verarbeiten ({status}): {detail}", 502
+                )
         except requests.RequestException:
             continue
     else:
