@@ -1,18 +1,22 @@
 # baulog — Implementierungsplan
 
-Internes Webtool zur **Baustellen-Verwaltung & Kosten-Tracking**.
+Internes Webtool zur **Projekt-, Baustellen- & Kosten-Verwaltung**.
 Läuft als Flask-App im lokalen Netz auf einem Raspberry Pi
 (`http://192.168.1.134:PORT`, Port aus `TOOL_PORT`).
 
-Erste Baustelle: **Mehrfamilienhaus Deisterstraße 40, Feggendorf**.
+Erstes Projekt: **Umbau Mehrfamilienhaus** mit Baustelle **Deisterstraße 40, Feggendorf**.
 
 ---
 
 ## 1. Zweck
 
-baulog dient der internen Erfassung und Auswertung aller Kosten einer Baustelle:
+baulog dient der internen Erfassung und Auswertung aller Kosten über mehrere
+Baustellen hinweg, gebündelt in **Projekten**:
 
-- Projekte (Baustellen) und deren **Gewerke** (Maurer, Elektro, Sanitär, Trockenbau, Dach, Fenster …) verwalten.
+- **Projekte** (oberste Ebene) verwalten — z. B. „Umbau MFH Deisterstraße 40",
+  „Neubau Garage". Ein Projekt kann **mehrere Baustellen** enthalten.
+- **Baustellen** (konkreter Ort/eigenständiger Kostenbereich) innerhalb eines Projekts.
+- **Gewerke** je Baustelle (Maurer, Elektro, Sanitär, Trockenbau, Dach, Fenster …).
 - **Aufgaben** je Gewerk anlegen (z. B. „Wand ziehen") mit Status und Beschreibung.
 - **Zeiterfassung** (Stunden × Stundensatz → Personalkosten) und **Materialerfassung**
   (Menge × Einzelpreis → Materialkosten) je Aufgabe.
@@ -20,7 +24,7 @@ baulog dient der internen Erfassung und Auswertung aller Kosten einer Baustelle:
   („mit Rechnung" / „ohne Rechnung") zur Trennung dokumentierter (versteuerbarer)
   von undokumentierten Kosten.
 - **Dashboard/Kostenübersicht**: Summen Material + Personal, getrennt nach
-  „mit Rechnung"/„ohne Rechnung", pro Baustelle und gesamt.
+  „mit Rechnung"/„ohne Rechnung", pro Baustelle, pro Projekt und gesamt.
 - **Dokumente & Fotos**: Upload von Rechnungen, Belegen und Fotos zu Aufgaben oder
   Materialpositionen mit Vorschau.
 - **Paperless-Integration (optional)**: Belege an Paperless-ngx durchreichen und Link anzeigen.
@@ -46,6 +50,10 @@ baulog/
     └── uploads/         # abgelegte Dateien: <doc_id>_<originalname>
 ```
 
+**MCP-Server (separat, in `~/hermes-tools/mcp/`):** `baulog_mcp.py` — dünner
+HTTP-Client auf die REST-API (gleiches Muster wie `rechnung_mcp.py`), damit Hermes
+**alle** Operationen direkt aus dem Chat steuern kann. Details in Abschnitt 9.
+
 **Konventionen** (aus Vorlage `server.py`):
 - `app = Flask(__name__, static_folder=".")`
 - Port aus `os.environ.get("TOOL_PORT", "5000")`, `host="0.0.0.0"`.
@@ -57,36 +65,44 @@ baulog/
 
 ## 3. UI-Skizze (Seiten / Ansichten + Navigation)
 
-Single-Page-App mit Hash-Routing (`#/`, `#/projekt/<id>` …). Persistente
-**Top-Bar** mit Titel + Baustellen-Auswahl (Dropdown), darunter **Tab-Navigation**.
-Mobile-first: ab 320px bedienbar, Touch-Ziele ≥ 44px, Tabellen werden auf schmalen
-Screens als **Card-List** dargestellt (`hidden sm:table` / `sm:hidden` Cards).
+Single-Page-App mit Hash-Routing. Persistente **Top-Bar** mit Titel,
+darunter **Tab-Navigation**. Mobile-first: ab 320px bedienbar, Touch-Ziele ≥ 44px,
+Tabellen werden auf schmalen Screens als **Card-List** dargestellt
+(`hidden sm:table` / `sm:hidden` Cards).
 
 ### Navigation (Bottom-Nav auf Mobile, Top-Tabs ab `sm`)
 ```
-[ Dashboard ] [ Aufgaben ] [ Gewerke ] [ Dokumente ] [ Projekte ]
+[ Dashboard ] [ Projekte ] [ Baustellen ] [ Gewerke ] [ Aufgaben ] [ Dokumente ]
 ```
 
 ### 3.1 Dashboard (`#/`)
-- Auswahl aktive Baustelle (oder „Alle").
+- **Auswahl Projekt** (oder „Alle Projekte") und **Auswahl Baustelle** (oder „Alle
+  Baustellen des Projekts").
 - Kachel-Karten mit Summen:
   - **Material** — mit Rechnung / ohne Rechnung / Gesamt
   - **Personal** — mit Rechnung / ohne Rechnung / Gesamt
   - **Gesamtkosten** — mit Rechnung / ohne Rechnung / Summe
-- Balken/Tabelle je Gewerk (Kostenverteilung).
-- Umschalter „pro Baustelle" ↔ „gesamt (alle Baustellen)".
+- Balken/Tabelle je Gewerk (Kostenverteilung) und je Baustelle.
+- Umschalter „Baustelle" ↔ „Projekt" ↔ „gesamt (alle)".
 
 ### 3.2 Projekte (`#/projekte`)
-- Liste aller Baustellen (Name, Adresse, Status, Gesamtkosten).
-- Button „+ Neue Baustelle" → Formular (Name, Adresse, Notiz).
-- Detail: Gewerke des Projekts verwalten.
+- Liste aller Projekte (Name, Notiz, Anzahl Baustellen, Gesamtkosten).
+- Button „+ Neues Projekt" → Formular (Name, Notiz).
+- **Projekt-Detail** (`#/projekt/<pid>`): zeigt die Baustellen des Projekts,
+  „+ Neue Baustelle" (Name, Adresse, Notiz).
 
-### 3.3 Gewerke (`#/projekt/<id>/gewerke`)
+### 3.3 Baustellen (`#/baustellen`)
+- Liste aller Baustellen (Name, Adresse, zugehöriges Projekt, Status, Gesamtkosten).
+- Filter nach Projekt.
+- Button „+ Neue Baustelle" → Formular (Name, Adresse, Projekt, Notiz).
+- **Baustellen-Detail** (`#/baustelle/<sid>`): Gewerke der Baustelle verwalten.
+
+### 3.4 Gewerke (`#/baustelle/<sid>/gewerke`)
 - Liste der Gewerke der aktiven Baustelle (Name, #Aufgaben, Kostensumme).
 - „+ Gewerk hinzufügen" (Name frei oder aus Vorschlagsliste:
   Maurer, Elektro, Sanitär, Trockenbau, Dach, Fenster).
 
-### 3.4 Aufgaben (`#/projekt/<id>/aufgaben`)
+### 3.5 Aufgaben (`#/baustelle/<sid>/aufgaben`)
 - Gefiltert nach Gewerk + Status (offen / in Arbeit / fertig).
 - Card-List (Mobile) / Tabelle (Desktop): Titel, Gewerk, Status-Badge, Kostensumme.
 - „+ Neue Aufgabe" → Titel, Gewerk, Status, Beschreibung.
@@ -100,7 +116,7 @@ Screens als **Card-List** dargestellt (`hidden sm:table` / `sm:hidden` Cards).
     (Kamera/Datei), optional „an Paperless senden".
   - Fußzeile: Kostensumme der Aufgabe (mit/ohne Rechnung).
 
-### 3.5 Dokumente (`#/projekt/<id>/dokumente`)
+### 3.6 Dokumente (`#/baustelle/<sid>/dokumente`)
 - Galerie aller Uploads der Baustelle (Vorschau, Dateiname, verknüpft mit Aufgabe/Material).
 - Filter nach Typ (Rechnung / Beleg / Foto).
 - Paperless-Link-Badge, wenn synchronisiert.
@@ -122,28 +138,37 @@ Alle Daten-Endpunkte unter `/api`, JSON. Beträge serverseitig berechnet.
 |---|---|---|
 | GET | `/` | liefert `index.html` |
 
-### Projekte (Baustellen)
+### Projekte (oberste Ebene)
 | Methode | Pfad | Zweck |
 |---|---|---|
-| GET | `/api/projects` | alle Baustellen (mit Kosten-Summary) |
-| POST | `/api/projects` | Baustelle anlegen |
-| GET | `/api/projects/<pid>` | Detail inkl. Gewerke |
-| PUT | `/api/projects/<pid>` | Baustelle ändern |
-| DELETE | `/api/projects/<pid>` | Baustelle löschen (kaskadiert) |
+| GET | `/api/projects` | alle Projekte (mit Kosten-Summary) |
+| POST | `/api/projects` | Projekt anlegen (name, note) |
+| GET | `/api/projects/<pid>` | Projekt-Detail inkl. Baustellen |
+| PUT | `/api/projects/<pid>` | Projekt ändern |
+| DELETE | `/api/projects/<pid>` | Projekt löschen (kaskadiert → Baustellen → …) |
+
+### Baustellen (innerhalb eines Projekts)
+| Methode | Pfad | Zweck |
+|---|---|---|
+| GET | `/api/sites?project=<pid>` | Baustellen (optional nach Projekt gefiltert) |
+| POST | `/api/sites` | Baustelle anlegen (name, address, project_id, note) |
+| GET | `/api/sites/<sid>` | Baustellen-Detail inkl. Gewerke |
+| PUT | `/api/sites/<sid>` | Baustelle ändern |
+| DELETE | `/api/sites/<sid>` | Baustelle löschen (kaskadiert) |
 
 ### Gewerke
 | Methode | Pfad | Zweck |
 |---|---|---|
-| GET | `/api/projects/<pid>/trades` | Gewerke der Baustelle |
-| POST | `/api/projects/<pid>/trades` | Gewerk anlegen |
+| GET | `/api/sites/<sid>/trades` | Gewerke der Baustelle |
+| POST | `/api/sites/<sid>/trades` | Gewerk anlegen |
 | PUT | `/api/trades/<tid>` | Gewerk umbenennen |
 | DELETE | `/api/trades/<tid>` | Gewerk löschen |
 
 ### Aufgaben
 | Methode | Pfad | Zweck |
 |---|---|---|
-| GET | `/api/projects/<pid>/tasks?trade=<tid>&status=<s>` | Aufgaben (filterbar) |
-| POST | `/api/projects/<pid>/tasks` | Aufgabe anlegen |
+| GET | `/api/sites/<sid>/tasks?trade=<tid>&status=<s>` | Aufgaben (filterbar) |
+| POST | `/api/sites/<sid>/tasks` | Aufgabe anlegen |
 | GET | `/api/tasks/<taskid>` | Aufgaben-Detail inkl. Zeiten, Material, Dokumente |
 | PUT | `/api/tasks/<taskid>` | Aufgabe ändern (Titel/Gewerk/Status/Beschreibung) |
 | DELETE | `/api/tasks/<taskid>` | Aufgabe löschen (kaskadiert) |
@@ -168,7 +193,7 @@ Alle Daten-Endpunkte unter `/api`, JSON. Beträge serverseitig berechnet.
 | Methode | Pfad | Zweck |
 |---|---|---|
 | POST | `/api/documents` | Upload (multipart: file, task_id\|material_id, doc_type) |
-| GET | `/api/documents?task_id=<>` \| `?material_id=<>` \| `?project_id=<>` | Liste |
+| GET | `/api/documents?task_id=<>` \| `?material_id=<>` \| `?site_id=<>` | Liste |
 | GET | `/api/documents/<docid>/file` | Datei/Vorschau ausliefern |
 | DELETE | `/api/documents/<docid>` | Dokument + Datei löschen |
 | POST | `/api/documents/<docid>/paperless` | optional an Paperless-ngx senden, Link speichern |
@@ -176,8 +201,9 @@ Alle Daten-Endpunkte unter `/api`, JSON. Beträge serverseitig berechnet.
 ### Kostenübersicht / Dashboard
 | Methode | Pfad | Zweck |
 |---|---|---|
-| GET | `/api/projects/<pid>/summary` | Summen je Baustelle (Material/Personal × mit/ohne Rechnung, je Gewerk) |
-| GET | `/api/summary` | Gesamtsummen über alle Baustellen |
+| GET | `/api/sites/<sid>/summary` | Summen je Baustelle (Material/Personal × mit/ohne Rechnung, je Gewerk) |
+| GET | `/api/projects/<pid>/summary` | Summen je Projekt (über alle Baustellen) |
+| GET | `/api/summary` | Gesamtsummen über alle Projekte |
 
 ### Konfiguration (nur Status, keine Secrets)
 | Methode | Pfad | Zweck |
@@ -195,10 +221,19 @@ Alle Daten-Endpunkte unter `/api`, JSON. Beträge serverseitig berechnet.
 DB: `data/baulog.db`. `PRAGMA foreign_keys = ON`. Zeitstempel als ISO-8601-Text.
 Geldbeträge als `REAL` (Euro). Rechnungs-Flag als `billed INTEGER` (1 = mit Rechnung, 0 = ohne).
 
-### `projects` — Baustellen
+### `projects` — Projekte (oberste Ebene)
 | Spalte | Typ | Hinweis |
 |---|---|---|
 | id | INTEGER PK AUTOINCREMENT | |
+| name | TEXT NOT NULL | z. B. „Umbau MFH Deisterstraße 40" |
+| note | TEXT | |
+| created_at | TEXT NOT NULL | |
+
+### `sites` — Baustellen
+| Spalte | Typ | Hinweis |
+|---|---|---|
+| id | INTEGER PK AUTOINCREMENT | |
+| project_id | INTEGER NOT NULL | FK → projects(id) ON DELETE CASCADE |
 | name | TEXT NOT NULL | z. B. „MFH Deisterstraße 40" |
 | address | TEXT | „Deisterstraße 40, Feggendorf" |
 | status | TEXT DEFAULT 'aktiv' | aktiv / abgeschlossen |
@@ -209,7 +244,7 @@ Geldbeträge als `REAL` (Euro). Rechnungs-Flag als `billed INTEGER` (1 = mit Rec
 | Spalte | Typ | Hinweis |
 |---|---|---|
 | id | INTEGER PK | |
-| project_id | INTEGER NOT NULL | FK → projects(id) ON DELETE CASCADE |
+| site_id | INTEGER NOT NULL | FK → sites(id) ON DELETE CASCADE |
 | name | TEXT NOT NULL | Maurer, Elektro, Sanitär … |
 | created_at | TEXT NOT NULL | |
 
@@ -217,7 +252,7 @@ Geldbeträge als `REAL` (Euro). Rechnungs-Flag als `billed INTEGER` (1 = mit Rec
 | Spalte | Typ | Hinweis |
 |---|---|---|
 | id | INTEGER PK | |
-| project_id | INTEGER NOT NULL | FK → projects(id) ON DELETE CASCADE |
+| site_id | INTEGER NOT NULL | FK → sites(id) ON DELETE CASCADE |
 | trade_id | INTEGER | FK → trades(id) ON DELETE SET NULL |
 | title | TEXT NOT NULL | „Wand ziehen" |
 | status | TEXT DEFAULT 'offen' | offen / in Arbeit / fertig |
@@ -258,7 +293,7 @@ Geldbeträge als `REAL` (Euro). Rechnungs-Flag als `billed INTEGER` (1 = mit Rec
 | id | INTEGER PK | |
 | task_id | INTEGER | FK → tasks(id) ON DELETE CASCADE (nullable) |
 | material_id | INTEGER | FK → materials(id) ON DELETE CASCADE (nullable) |
-| project_id | INTEGER | FK → projects(id) (Denormalisierung für Galerie-Filter) |
+| site_id | INTEGER | FK → sites(id) (Denormalisierung für Galerie-Filter) |
 | filename | TEXT NOT NULL | Originaldateiname |
 | stored_path | TEXT NOT NULL | Pfad in data/uploads/ |
 | mime | TEXT | image/jpeg, application/pdf … |
@@ -267,22 +302,23 @@ Geldbeträge als `REAL` (Euro). Rechnungs-Flag als `billed INTEGER` (1 = mit Rec
 | paperless_url | TEXT | Link zum Paperless-Dokument (nullable) |
 | created_at | TEXT NOT NULL | |
 
-**Beziehungen:** `projects 1—n trades`, `projects 1—n tasks`, `trades 1—n tasks`,
-`tasks 1—n time_entries`, `tasks 1—n materials`, `documents` hängt an `task` **oder**
-`material` (mind. eines gesetzt), zusätzlich `project_id` zur schnellen Galerie-Filterung.
+**Beziehungen:** `projects 1—n sites`, `sites 1—n trades`, `sites 1—n tasks`,
+`trades 1—n tasks`, `tasks 1—n time_entries`, `tasks 1—n materials`,
+`documents` hängt an `task` **oder** `material` (mind. eines gesetzt), zusätzlich
+`site_id` zur schnellen Galerie-Filterung.
 
 ---
 
 ## 6. Kostenberechnung (Aggregationslogik)
 
-Für `summary`-Endpunkte je Baustelle bzw. gesamt:
+Für `summary`-Endpunkte je Baustelle, je Projekt bzw. gesamt:
 
 - **Material mit Rechnung** = Σ `qty*unit_price` über `materials` mit `billed=1`
 - **Material ohne Rechnung** = Σ `qty*unit_price` über `materials` mit `billed=0`
 - **Personal mit Rechnung** = Σ `hours*hourly_rate` über `time_entries` mit `billed=1`
 - **Personal ohne Rechnung** = Σ `hours*hourly_rate` über `time_entries` mit `billed=0`
 - **Gesamt mit Rechnung** / **Gesamt ohne Rechnung** / **Gesamtsumme** entsprechend.
-- Zusätzlich Aufschlüsselung je Gewerk (Join `tasks.trade_id`).
+- Zusätzlich Aufschlüsselung je Gewerk (Join `tasks.trade_id`) und je Baustelle.
 
 ---
 
@@ -305,10 +341,11 @@ Für `summary`-Endpunkte je Baustelle bzw. gesamt:
 - [ ] App unter `http://192.168.1.134:$TOOL_PORT` erreichbar; Port aus `TOOL_PORT`.
 - [ ] `GET /` liefert `index.html`; META.json (title/description/icon) gepflegt.
 
-### Projekte & Gewerke
-- [ ] Baustelle „MFH Deisterstraße 40, Feggendorf" anlegen, bearbeiten, in Liste sichtbar.
+### Projekte & Baustellen & Gewerke
+- [ ] Projekt „Umbau MFH Deisterstraße 40" anlegen, bearbeiten, in Liste sichtbar.
+- [ ] Baustelle „MFH Deisterstraße 40, Feggendorf" innerhalb des Projekts anlegen.
 - [ ] Gewerke (Maurer, Elektro, Sanitär, Trockenbau, Dach, Fenster) anlegen/löschen.
-- [ ] Löschen einer Baustelle entfernt zugehörige Gewerke/Aufgaben (Kaskade).
+- [ ] Löschen eines Projekts entfernt Baustellen → Gewerke → Aufgaben (Kaskade).
 
 ### Aufgaben
 - [ ] Aufgabe „Wand ziehen" mit Gewerk „Maurer", Status, Beschreibung anlegen.
@@ -325,7 +362,7 @@ Für `summary`-Endpunkte je Baustelle bzw. gesamt:
 
 ### Kostenübersicht / Dashboard
 - [ ] Summen Material + Personal je „mit Rechnung"/„ohne Rechnung" pro Baustelle korrekt.
-- [ ] Gesamtsummen über alle Baustellen korrekt.
+- [ ] Summen pro Projekt und Gesamtsummen über alle Projekte korrekt.
 - [ ] Aufschlüsselung je Gewerk stimmt mit Einzelposten überein.
 
 ### Dokumente & Fotos
@@ -348,3 +385,116 @@ Für `summary`-Endpunkte je Baustelle bzw. gesamt:
 - [ ] Keine API-Keys/Tokens im Frontend oder in `/api/config`.
 - [ ] `secure_filename` verhindert Pfad-Traversal bei Uploads.
 - [ ] Ungültige IDs → sauberer 404/400 mit `{ "error": ... }`.
+
+---
+
+## 9. MCP-Server (Agenten-Steuerung aus dem Chat)
+
+Zusätzlich zur Web-UI wird ein MCP-Server **`baulog_mcp.py`** gebaut (Datei in
+`~/hermes-tools/mcp/`, registriert in `~/.hermes/config.yaml` unter `mcp_servers:`),
+damit Hermes **alle** Operationen direkt aus dem Chat steuern kann — anlegen, listen,
+ändern, löschen, Summen abrufen, Dokumente hochladen. Der MCP-Server ist ein dünner
+HTTP-Client auf die REST-API von `server.py` (gleiche SQLite-DB → **eine** Datenquelle,
+kein Zustands-Drift zwischen UI und Chat).
+
+**Konventionen (identisch zu `rechnung_mcp.py`):**
+- `BASE_URL = os.environ.get("BAULOG_URL", "http://127.0.0.1:5112")`.
+- Nur stdlib (`urllib.request`) — **keine** neue Dependency im hermes-tools venv.
+- `from mcp_helper import register_tool, run_server`; jede Funktion wird per
+  `register_tool("name", fn)` registriert; `run_server()` als Entrypoint.
+- **JEDES Feld** wird über Parametername + Typ + Docstring dokumentiert — das
+  MCP-Tool-Schema entsteht automatisch aus `inspect.signature`, daher ist die
+  Docstring-Qualität die Dokumentation für den Agenten.
+- Mapping `mit_rechnung: bool` (MCP) → `billed: 0/1` (API) passiert im Wrapper.
+
+### Tool-Liste (34 Tools, jedes Feld dokumentiert)
+
+**Projekte**
+| Tool | Felder | Zweck |
+|---|---|---|
+| `projekt_anlegen` | `name` (str, Pflicht), `note` (str, "") | Projekt anlegen |
+| `projekte_liste` | — | Alle Projekte + Baustellen-Anzahl + Gesamtkosten |
+| `projekt_details` | `projekt_id` (int) | Detail inkl. Baustellen |
+| `projekt_bearbeiten` | `projekt_id`, `name`=None, `note`=None | Nur angegebene Felder ändern |
+| `projekt_loeschen` | `projekt_id` | Löschen (Kaskade → Baustellen → …) |
+
+**Baustellen**
+| Tool | Felder | Zweck |
+|---|---|---|
+| `baustelle_anlegen` | `name` (Pflicht), `projekt_id` (int, Pflicht), `address`="", `note`="" | Baustelle anlegen |
+| `baustellen_liste` | `projekt_id` (int, None) | Baustellen, optional nach Projekt gefiltert |
+| `baustelle_details` | `baustelle_id` (int) | Detail inkl. Gewerke |
+| `baustelle_bearbeiten` | `baustelle_id`, `name`=None, `address`=None, `status`=None, `note`=None, `projekt_id`=None | ändern |
+| `baustelle_loeschen` | `baustelle_id` | Löschen (Kaskade) |
+
+**Gewerke**
+| Tool | Felder | Zweck |
+|---|---|---|
+| `gewerk_anlegen` | `baustelle_id` (int, Pflicht), `name` (str, Pflicht) | Gewerk anlegen (z.B. „Maurer") |
+| `gewerke_liste` | `baustelle_id` (int) | Gewerke der Baustelle |
+| `gewerk_bearbeiten` | `gewerk_id` (int), `name` (str) | umbenennen |
+| `gewerk_loeschen` | `gewerk_id` (int) | löschen |
+
+**Aufgaben**
+| Tool | Felder | Zweck |
+|---|---|---|
+| `aufgabe_anlegen` | `baustelle_id` (Pflicht), `titel` (str, Pflicht), `gewerk_id`=None, `status`="offen", `beschreibung`="" | Aufgabe anlegen |
+| `aufgaben_liste` | `baustelle_id`=None, `gewerk_id`=None, `status`=None | filterbar (Gewerk + Status) |
+| `aufgabe_details` | `aufgabe_id` (int) | Detail inkl. Zeiten/Material/Dokumente/Kosten |
+| `aufgabe_bearbeiten` | `aufgabe_id`, `titel`=None, `gewerk_id`=None, `status`=None, `beschreibung`=None | ändern |
+| `aufgabe_loeschen` | `aufgabe_id` | Löschen (Kaskade) |
+
+**Zeiterfassung (Personalkosten)**
+| Tool | Felder | Zweck |
+|---|---|---|
+| `zeiteintrag_anlegen` | `aufgabe_id` (Pflicht), `person` (str, Pflicht), `stunden` (float), `stundensatz` (float, €/h), `mit_rechnung`=True, `datum`="" | Zeit erfassen; Kosten=Stunden×Satz |
+| `zeiteintraege_liste` | `aufgabe_id` (int) | Zeiteinträge der Aufgabe |
+| `zeiteintrag_bearbeiten` | `zeiteintrag_id`, `person`=None, `stunden`=None, `stundensatz`=None, `mit_rechnung`=None, `datum`=None | ändern |
+| `zeiteintrag_loeschen` | `zeiteintrag_id` (int) | löschen |
+
+**Material**
+| Tool | Felder | Zweck |
+|---|---|---|
+| `material_anlegen` | `aufgabe_id` (Pflicht), `bezeichnung` (str, Pflicht), `menge` (float), `einzelpreis` (float, €), `einheit`="Stk", `mit_rechnung`=True | Position; Kosten=Menge×Einzelpreis |
+| `materialien_liste` | `aufgabe_id` (int) | Positionen der Aufgabe |
+| `material_bearbeiten` | `material_id`, `bezeichnung`=None, `menge`=None, `einheit`=None, `einzelpreis`=None, `mit_rechnung`=None | ändern |
+| `material_loeschen` | `material_id` (int) | löschen |
+
+**Kostenübersicht**
+| Tool | Felder | Zweck |
+|---|---|---|
+| `baustelle_summary` | `baustelle_id` (int) | Material/Personal × mit/ohne Rechnung, je Gewerk |
+| `projekt_summary` | `projekt_id` (int) | Summen über alle Baustellen des Projekts |
+| `gesamt_summary` | — | Summen über alle Projekte |
+
+**Dokumente & Fotos**
+| Tool | Felder | Zweck |
+|---|---|---|
+| `dokument_hochladen` | `datei_pfad` (str, Pflicht), `aufgabe_id`=None, `material_id`=None, `doc_type`="beleg" | lokale Datei (Foto/PDF) als multipart hochladen |
+| `dokumente_liste` | `aufgabe_id`=None, `material_id`=None, `baustelle_id`=None, `doc_type`=None | Galerie/Filter |
+| `dokument_loeschen` | `dokument_id` (int) | DB-Eintrag + Datei löschen |
+| `dokument_zu_paperless` | `dokument_id` (int) | Beleg an Paperless-ngx senden, Link speichern |
+
+### Feld-Wertebereiche
+- `status` (Baustelle): `aktiv` / `abgeschlossen`.
+- `status` (Aufgabe): `offen` / `in Arbeit` / `fertig`.
+- `mit_rechnung`: `True` = mit Rechnung (dokumentiert/versteuerbar), `False` = ohne Rechnung.
+- `doc_type`: `rechnung` / `beleg` / `foto`.
+- `datum` (Zeiteintrag): ISO `YYYY-MM-DD`, optional.
+- `dokument_hochladen` verlangt genau **eine** Zuordnung: `aufgabe_id` **oder** `material_id`.
+
+### Upload-Mechanik (`dokument_hochladen`)
+Der MCP-Server liest `datei_pfad` (lokaler Pfad auf dem Pi) und sendet ihn als
+`multipart/form-data` an `POST /api/documents` (Felder `file`, `task_id`/`material_id`,
+`doc_type`). `server.py` speichert unter `data/uploads/`, Whitelist `.jpg/.jpeg/.png/.webp/.pdf`,
+`secure_filename` gegen Pfad-Traversal.
+
+### MCP-Test-Checkliste
+- [ ] `baulog_mcp.py` startet als MCP-Server (`hermes mcp test baulog` → Tools entdeckt).
+- [ ] Projekt + Baustelle + Gewerk + Aufgabe per MCP anlegen und per `_liste` wiederfinden.
+- [ ] Zeiteintrag + Material per MCP mit `mit_rechnung=True/False` anlegen; Summen stimmen.
+- [ ] `baustelle_summary`/`projekt_summary`/`gesamt_summary` liefern korrekte Beträge.
+- [ ] `dokument_hochladen` mit lokalem Bild lädt hoch und erscheint in `dokumente_liste`.
+- [ ] `dokument_zu_paperless` nur bei aktiver Paperless-Config erfolgreich.
+- [ ] MCP-Änderungen sind in der Web-UI sichtbar (gleiche DB) und umgekehrt.
+
