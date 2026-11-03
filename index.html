@@ -3,70 +3,170 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Baulog</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <title>Baulog · Hyper WorkWise</title>
   <style>
+    :root { --ink:#1A1A1A; --grey:#5C5C5C; --line:#CFCFCB; --fill:#F4F4F2;
+            --green:#2E7D5B; --hellgruen:#8ECDB0; --red:#B23A3A; --amber:#B07D10; }
+    * { box-sizing: border-box; }
     html, body { overflow-x: hidden; }
-    #modal-backdrop { transition: opacity 0.15s; }
-    #app { padding-bottom: 5rem; }
-    @media (min-width: 640px) { #app { padding-bottom: 0; } }
-    @keyframes slidein { from { transform: translateY(100%); opacity:0; } to { transform: translateY(0); opacity:1; } }
-    .toast-enter { animation: slidein 0.2s ease-out; }
+    body { font-family: Arial, "Liberation Sans", sans-serif; color: var(--ink);
+           margin: 0; background: #fafafa; padding-bottom: 64px; }
+    @media (min-width:640px) { body { padding-bottom: 0; } }
+    .topnav { background: var(--ink); color: #fff; position: sticky; top: 0; z-index: 40; }
+    .topnav-innen { max-width: 1100px; margin: 0 auto; padding: 10px 16px;
+                    display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
+    .marke { font-weight: bold; letter-spacing: 2px; font-size: 13px; color: #fff;
+             text-decoration: none; }
+    .marke span { color: var(--hellgruen); }
+    .tabs { display: none; gap: 14px; }
+    @media (min-width:640px) { .tabs { display: flex; } }
+    .tabs a { color: var(--line); text-decoration: none; font-size: 14px; padding: 4px 2px; }
+    .tabs a.aktiv, .tabs a:hover { color: #fff; }
+    main { max-width: 1100px; margin: 16px auto; padding: 0 12px; }
+    h1 { font-size: 22px; margin: 0 0 16px; }
+    h2 { font-size: 16px; margin: 20px 0 8px; }
+    .bottomnav { position: fixed; bottom: 0; left: 0; right: 0; background: var(--ink);
+                 display: flex; z-index: 40; }
+    @media (min-width:640px) { .bottomnav { display: none; } }
+    .bottomnav a { flex: 1; text-align: center; padding: 8px 2px 10px; min-height: 52px;
+                   font-size: 10px; color: var(--line); text-decoration: none;
+                   display: flex; flex-direction: column; justify-content: center; }
+    .bottomnav a.aktiv { color: #fff; font-weight: bold; }
+    .karten { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+              gap: 10px; margin-bottom: 16px; }
+    .karte { background: #fff; border: 1px solid var(--line); padding: 12px 14px; }
+    .karte .zahl { font-size: 20px; font-weight: bold; }
+    .karte .label { color: var(--grey); font-size: 12px; margin-top: 2px; }
+    .karte.ok .zahl { color: var(--green); }
+    .karte.warn .zahl { color: var(--red); }
+    .box { background: #fff; border: 1px solid var(--line); margin-bottom: 16px; }
+    .box-kopf { display: flex; align-items: center; justify-content: space-between; gap: 8px;
+                padding: 10px 12px; border-bottom: 1px solid var(--line);
+                font-weight: bold; font-size: 14px; }
+    .box-inhalt { padding: 12px; }
+    .box-pad { padding: 12px; }
+    .zeile { padding: 10px 0; border-bottom: 1px solid var(--fill); }
+    .zeile:last-child { border-bottom: none; }
+    .seitenkopf { display: flex; align-items: center; justify-content: space-between;
+                  gap: 8px; margin-bottom: 12px; }
+    table { width: 100%; border-collapse: collapse; background: #fff; }
+    th { background: #E7E7E3; text-align: left; font-size: 12px; padding: 8px 10px;
+         border-bottom: 1px solid var(--line); }
+    td { padding: 8px 10px; border-bottom: 1px solid var(--line); font-size: 14px;
+         vertical-align: top; }
+    td.r, th.r { text-align: right; }
+    .badge { display: inline-block; padding: 2px 8px; font-size: 11px;
+             border: 1px solid var(--line); background: var(--fill); }
+    .badge.offen { border-color: var(--amber); color: var(--amber); background: #fff; }
+    .badge.inarbeit { border-color: var(--amber); color: #fff; background: var(--amber); }
+    .badge.fertig { border-color: var(--green); color: var(--green); background: #fff; }
+    .badge.aktiv { border-color: var(--green); color: var(--green); background: #fff; }
+    .badge.abgeschlossen { color: var(--grey); }
+    .badge.mit { border-color: var(--green); color: var(--green); background: #fff; }
+    .badge.ohne { border-color: var(--red); color: var(--red); background: #fff; }
+    button, .btn { font: inherit; font-size: 13px; padding: 6px 12px;
+                   border: 1px solid var(--ink); background: var(--ink); color: #fff;
+                   cursor: pointer; text-decoration: none; display: inline-flex;
+                   align-items: center; justify-content: center; min-height: 40px; }
+    @media (max-width:639px) { button, .btn { min-height: 44px; } }
+    .btn.hell, button.hell { background: #fff; color: var(--ink); border-color: var(--line); }
+    .btn.rot, button.rot { background: #fff; color: var(--red); border-color: var(--red); }
+    .btn.klein, button.klein { min-height: 32px; padding: 3px 9px; font-size: 12px; }
+    input, select, textarea { font: inherit; font-size: 14px; padding: 9px;
+                              border: 1px solid var(--line); width: 100%;
+                              background: #fff; min-height: 44px; }
+    textarea { min-height: 80px; }
+    label { font-size: 12px; color: var(--grey); display: block; margin: 10px 0 3px; }
+    .muted { color: var(--grey); font-size: 13px; }
+    .link { color: var(--green); text-decoration: none; font-weight: bold; }
+    .link:hover { text-decoration: underline; }
+    .btn-link { background: transparent; border: none; padding: 0; min-height: auto;
+                font: inherit; font-size: 13px; color: var(--green); text-decoration: none;
+                font-weight: bold; cursor: pointer; }
+    .btn-link:hover { text-decoration: underline; }
+    .leer { text-align: center; color: var(--grey); padding: 32px 0; font-size: 14px; }
+    .balken { background: var(--fill); height: 6px; }
+    .balken > div { background: var(--green); height: 6px; }
+    .galerie { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+               gap: 10px; }
+    .thumb { width: 100%; height: 96px; object-fit: cover; border: 1px solid var(--line);
+             display: flex; align-items: center; justify-content: center;
+             font-size: 28px; background: var(--fill); }
+    .brotkrumen { font-size: 13px; color: var(--grey); margin-bottom: 12px;
+                  display: flex; flex-wrap: wrap; gap: 4px; }
+    .brotkrumen a { color: var(--green); text-decoration: none; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
+    @media (max-width:639px) { .grid2 { grid-template-columns: 1fr; } }
+    .aktionen { display: flex; gap: 8px; margin: 12px 0; flex-wrap: wrap; }
+    .nur-mobil { display: block; }
+    .nur-desktop { display: none; }
+    @media (min-width:640px) { .nur-mobil { display: none; } .nur-desktop { display: block; } }
+    .scrollx { overflow-x: auto; }
+    #modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 50;
+                      display: flex; align-items: flex-end; justify-content: center;
+                      padding: 8px; }
+    @media (min-width:640px) { #modal-backdrop { align-items: center; padding: 16px; } }
+    #modal-backdrop.hidden { display: none; }
+    #modal-box { background: #fff; border: 1px solid var(--line); width: 100%;
+                 max-width: 560px; max-height: 90vh; overflow-y: auto;
+                 animation: slidein .15s ease-out; }
+    .modal-kopf { display: flex; align-items: center; justify-content: space-between;
+                  padding: 12px; border-bottom: 1px solid var(--line); }
+    .modal-kopf h2 { margin: 0; font-size: 16px; }
+    #toast-container { position: fixed; bottom: 72px; left: 12px; right: 12px; z-index: 60;
+                       display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+    @media (min-width:640px) { #toast-container { bottom: 16px; left: auto; right: 16px;
+                                                  width: 320px; } }
+    .toast { pointer-events: auto; padding: 10px 14px; font-size: 14px; color: #fff;
+             background: var(--ink); animation: slidein .2s ease-out; }
+    .toast.success { background: var(--green); }
+    .toast.error { background: var(--red); }
+    .hidden { display: none; }
+    @keyframes slidein { from { transform: translateY(100%); opacity: 0; }
+                         to { transform: translateY(0); opacity: 1; } }
   </style>
 </head>
-<body class="bg-gray-50 text-gray-900 min-h-screen">
+<body>
 
 <!-- ===== TOP BAR ===== -->
-<header class="bg-blue-700 text-white shadow-md sticky top-0 z-40">
-  <div class="flex items-center justify-between px-4 h-14 max-w-5xl mx-auto">
-    <a href="#/" class="text-xl font-bold tracking-tight">🏗 Baulog</a>
-    <nav class="hidden sm:flex gap-1 text-sm">
-      <a href="#/" data-tab="dashboard" class="nav-tab px-3 py-2 rounded-md font-medium transition">Dashboard</a>
-      <a href="#/projekte" data-tab="projekte" class="nav-tab px-3 py-2 rounded-md font-medium transition">Projekte</a>
-      <a href="#/baustellen" data-tab="baustellen" class="nav-tab px-3 py-2 rounded-md font-medium transition">Baustellen</a>
-      <a href="#/aufgaben" data-tab="aufgaben" class="nav-tab px-3 py-2 rounded-md font-medium transition">Aufgaben</a>
-      <a href="#/dokumente" data-tab="dokumente" class="nav-tab px-3 py-2 rounded-md font-medium transition">Dokumente</a>
+<header class="topnav">
+  <div class="topnav-innen">
+    <a href="#/" class="marke"><span>∞</span> BAULOG</a>
+    <nav class="tabs">
+      <a href="#/" data-tab="dashboard">Dashboard</a>
+      <a href="#/projekte" data-tab="projekte">Projekte</a>
+      <a href="#/baustellen" data-tab="baustellen">Baustellen</a>
+      <a href="#/aufgaben" data-tab="aufgaben">Aufgaben</a>
+      <a href="#/personen" data-tab="personen">Personen</a>
+      <a href="#/dokumente" data-tab="dokumente">Dokumente</a>
     </nav>
   </div>
 </header>
 
 <!-- ===== HAUPTINHALT ===== -->
-<main id="app" class="max-w-5xl mx-auto px-4 py-4 w-full max-w-full break-words">
-  <div id="view" class="min-h-[60vh]">
-    <div class="flex justify-center items-center h-40">
-      <span class="text-gray-400">Wird geladen…</span>
-    </div>
+<main id="app">
+  <div id="view" class="min-h">
+    <div class="leer">Wird geladen…</div>
   </div>
 </main>
 
 <!-- ===== BOTTOM NAV (Mobile) ===== -->
-<nav class="sm:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-40 flex">
-  <a href="#/" data-tab="dashboard" class="bnav-tab flex-1 flex flex-col items-center justify-center py-2 min-h-[56px] text-xs text-gray-600 transition">
-    <span class="text-lg">📊</span><span>Dashboard</span>
-  </a>
-  <a href="#/projekte" data-tab="projekte" class="bnav-tab flex-1 flex flex-col items-center justify-center py-2 min-h-[56px] text-xs text-gray-600 transition">
-    <span class="text-lg">📁</span><span>Projekte</span>
-  </a>
-  <a href="#/baustellen" data-tab="baustellen" class="bnav-tab flex-1 flex flex-col items-center justify-center py-2 min-h-[56px] text-xs text-gray-600 transition">
-    <span class="text-lg">🏠</span><span>Baustellen</span>
-  </a>
-  <a href="#/aufgaben" data-tab="aufgaben" class="bnav-tab flex-1 flex flex-col items-center justify-center py-2 min-h-[56px] text-xs text-gray-600 transition">
-    <span class="text-lg">✅</span><span>Aufgaben</span>
-  </a>
-  <a href="#/dokumente" data-tab="dokumente" class="bnav-tab flex-1 flex flex-col items-center justify-center py-2 min-h-[56px] text-xs text-gray-600 transition">
-    <span class="text-lg">📄</span><span>Dokumente</span>
-  </a>
+<nav class="bottomnav">
+  <a href="#/" data-tab="dashboard">Start</a>
+  <a href="#/projekte" data-tab="projekte">Projekte</a>
+  <a href="#/baustellen" data-tab="baustellen">Baustellen</a>
+  <a href="#/aufgaben" data-tab="aufgaben">Aufgaben</a>
+  <a href="#/personen" data-tab="personen">Personen</a>
+  <a href="#/dokumente" data-tab="dokumente">Docs</a>
 </nav>
 
 <!-- ===== MODAL-OVERLAY ===== -->
-<div id="modal-backdrop" class="hidden fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-2 sm:p-4">
-  <div id="modal-box" class="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-[95vw] sm:max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl">
-    <div id="modal-content"></div>
-  </div>
+<div id="modal-backdrop" class="hidden">
+  <div id="modal-box"><div id="modal-content"></div></div>
 </div>
 
 <!-- ===== TOAST ===== -->
-<div id="toast-container" class="fixed bottom-20 sm:bottom-6 left-4 right-4 sm:left-auto sm:right-6 sm:w-80 z-50 flex flex-col gap-2 pointer-events-none"></div>
+<div id="toast-container"></div>
 
 <script>
 'use strict';
@@ -80,6 +180,9 @@ const State = {
   sites: [],
 };
 
+// View-lokale Daten-Caches (für Edit-Modals ohne String-Parameter)
+const ViewData = {};
+
 // ============================================================
 // UTILITIES
 // ============================================================
@@ -89,43 +192,19 @@ function formatEuro(val) {
   return n.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '\u00a0€';
 }
 
-function statusBadge(status) {
-  const map = {
-    'offen':         'bg-gray-200 text-gray-700',
-    'in Arbeit':     'bg-yellow-200 text-yellow-800',
-    'fertig':        'bg-green-200 text-green-800',
-    'aktiv':         'bg-blue-100 text-blue-800',
-    'abgeschlossen': 'bg-purple-100 text-purple-800',
-  };
-  const cls = map[status] || 'bg-gray-100 text-gray-600';
-  return `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${cls}">${esc(status)}</span>`;
+// Menge/Stunden: deutsche Schreibweise, keine Float-Artefakte
+// (0.1 + 0.2 wurde sonst als "0.30000000000000004 h" angezeigt).
+function formatZahl(val) {
+  const n = parseFloat(val);
+  if (!isFinite(n)) return '0';
+  return n.toLocaleString('de-DE', { maximumFractionDigits: 2 });
 }
 
-function billedBadge(billed) {
-  return billed
-    ? `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">mit Rechnung</span>`
-    : `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-800">ohne Rechnung</span>`;
-}
-
-function billedToggleHTML(currentBilled, fnName) {
-  const a = currentBilled === 1 ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-100';
-  const b = currentBilled === 0 ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-100';
-  return `
-    <div class="inline-flex rounded-lg border border-gray-300 overflow-hidden">
-      <button type="button" onclick="${fnName}(1)" data-billed="1"
-        class="px-4 py-2 min-h-[44px] text-sm font-medium transition ${a}">mit Rechnung</button>
-      <button type="button" onclick="${fnName}(0)" data-billed="0"
-        class="px-4 py-2 min-h-[44px] text-sm font-medium transition border-l border-gray-300 ${b}">ohne Rechnung</button>
-    </div>`;
-}
-
-function updateBilledToggle(val) {
-  document.querySelectorAll('[data-billed]').forEach(b => {
-    const isActive = parseInt(b.dataset.billed) === val;
-    const base = 'px-4 py-2 min-h-[44px] text-sm font-medium transition';
-    const border = b.dataset.billed === '0' ? ' border-l border-gray-300' : '';
-    b.className = `${base}${border} ${isActive ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-100'}`;
-  });
+// ISO-Datum (2026-08-20) als 20.08.2026 anzeigen; ungültige Werte unverändert.
+function formatDatum(val) {
+  if (!val) return '';
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(val));
+  return m ? `${m[3]}.${m[2]}.${m[1]}` : String(val);
 }
 
 function esc(str) {
@@ -134,18 +213,49 @@ function esc(str) {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
-function emptyState(text) {
-  return `<div class="text-center py-12 text-gray-400">
-    <div class="text-4xl mb-2">📭</div>
-    <p>${esc(text)}</p>
+const IC = '';
+const SC = '';
+const BP = 'btn';
+const BS = 'btn hell';
+const BD = 'btn rot';
+
+function statusBadge(status) {
+  const map = { 'offen': 'offen', 'in Arbeit': 'inarbeit', 'fertig': 'fertig',
+                'aktiv': 'aktiv', 'abgeschlossen': 'abgeschlossen' };
+  return `<span class="badge ${map[status] || ''}">${esc(status)}</span>`;
+}
+
+function billedBadge(billed) {
+  return billed
+    ? `<span class="badge mit">mit Rechnung</span>`
+    : `<span class="badge ohne">ohne Rechnung</span>`;
+}
+
+function billedToggleHTML(currentBilled, fnName) {
+  const a = currentBilled === 1 ? 'btn' : 'btn hell';
+  const b = currentBilled === 0 ? 'btn' : 'btn hell';
+  return `<div style="display:inline-flex;">
+    <button type="button" onclick="${fnName}(1)" data-billed="1" class="${a}">mit Rechnung</button>
+    <button type="button" onclick="${fnName}(0)" data-billed="0" class="${b}">ohne Rechnung</button>
   </div>`;
 }
 
+function updateBilledToggle(val) {
+  document.querySelectorAll('[data-billed]').forEach(b => {
+    b.className = parseInt(b.dataset.billed) === val ? 'btn' : 'btn hell';
+  });
+}
+
+function emptyState(text) {
+  return `<div class="leer">${esc(text)}</div>`;
+}
+
 function loadingSpinner() {
-  return `<div class="flex justify-center py-12"><div class="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full"></div></div>`;
+  return `<div class="leer">Wird geladen…</div>`;
 }
 
 // ============================================================
@@ -153,11 +263,9 @@ function loadingSpinner() {
 // ============================================================
 
 function showToast(msg, type) {
-  type = type || 'info';
-  const colors = { info: 'bg-blue-600 text-white', success: 'bg-green-600 text-white', error: 'bg-red-600 text-white' };
   const c = document.getElementById('toast-container');
   const div = document.createElement('div');
-  div.className = `pointer-events-auto toast-enter rounded-xl shadow-lg px-4 py-3 text-sm ${colors[type] || colors.info}`;
+  div.className = `toast ${type || ''}`;
   div.textContent = msg;
   c.appendChild(div);
   setTimeout(() => { if (div.parentNode) div.remove(); }, 4000);
@@ -214,21 +322,13 @@ document.getElementById('modal-backdrop').addEventListener('click', function(e) 
 });
 
 function modalHeader(title) {
-  return `<div class="flex items-center justify-between p-4 border-b border-gray-100">
-    <h2 class="text-lg font-semibold">${esc(title)}</h2>
-    <button onclick="closeModal()" class="w-11 h-11 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-500 text-xl" aria-label="Schließen">✕</button>
-  </div>`;
+  return `<div class="modal-kopf"><h2>${esc(title)}</h2>
+    <button type="button" onclick="closeModal()" class="btn hell klein" aria-label="Schließen">✕</button></div>`;
 }
 
 function formRow(label, inputHTML) {
-  return `<div class="mb-4"><label class="block text-sm font-medium text-gray-700 mb-1">${label}</label>${inputHTML}</div>`;
+  return `<div><label>${label}</label>${inputHTML}</div>`;
 }
-
-const IC = 'w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[44px]';
-const SC = 'w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[44px] bg-white';
-const BP = 'inline-flex items-center justify-center min-h-[44px] px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition disabled:opacity-50';
-const BS = 'inline-flex items-center justify-center min-h-[44px] px-4 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-200 transition';
-const BD = 'inline-flex items-center justify-center min-h-[44px] px-4 py-2 bg-red-100 text-red-700 rounded-lg text-sm font-medium hover:bg-red-200 transition';
 
 // ============================================================
 // ROUTER
@@ -242,19 +342,15 @@ function currentTab() {
   if (h.startsWith('#/projekte') || h.startsWith('#/projekt/')) return 'projekte';
   if (h.startsWith('#/baustellen') || h.startsWith('#/baustelle/')) return 'baustellen';
   if (h.startsWith('#/aufgaben') || h.startsWith('#/aufgabe/')) return 'aufgaben';
+  if (h.startsWith('#/personen')) return 'personen';
   if (h.startsWith('#/dokumente')) return 'dokumente';
   return '';
 }
 
 function updateNavHighlight() {
   const tab = currentTab();
-  document.querySelectorAll('.nav-tab').forEach(el => {
-    const active = el.dataset.tab === tab;
-    el.className = `nav-tab px-3 py-2 rounded-md font-medium transition ${active ? 'bg-blue-800 text-white' : 'text-blue-100 hover:bg-blue-600'}`;
-  });
-  document.querySelectorAll('.bnav-tab').forEach(el => {
-    const active = el.dataset.tab === tab;
-    el.className = `bnav-tab flex-1 flex flex-col items-center justify-center py-2 min-h-[56px] text-xs transition ${active ? 'text-blue-600 font-semibold' : 'text-gray-500'}`;
+  document.querySelectorAll('.tabs a, .bottomnav a').forEach(el => {
+    el.classList.toggle('aktiv', el.dataset.tab === tab);
   });
 }
 
@@ -263,7 +359,10 @@ async function render() {
   closeModal();
   const hash = window.location.hash || '#/';
   const view = document.getElementById('view');
-  const noHash = hash.replace(/^#/, '');
+  // Query-Teil (?project=1) vor dem Zerlegen abtrennen — sonst landet er im
+  // letzten Pfadsegment und KEIN Filter-Link findet seine Route.
+  // Die Views lesen die Query selbst aus window.location.hash.
+  const noHash = hash.replace(/^#/, '').split('?')[0];
   const parts = noHash.split('/').filter(Boolean);
 
   try {
@@ -287,11 +386,13 @@ async function render() {
       await renderAufgabenGesamt();
     } else if (parts[0] === 'dokumente') {
       await renderDokumenteGesamt();
+    } else if (parts[0] === 'personen') {
+      await renderPersonen();
     } else {
-      view.innerHTML = `<p class="text-gray-500 text-center py-12">Seite nicht gefunden.</p>`;
+      view.innerHTML = `<p class="leer">Seite nicht gefunden.</p>`;
     }
   } catch (e) {
-    view.innerHTML = `<div class="bg-red-50 border border-red-200 rounded-xl p-4 text-red-700">
+    view.innerHTML = `<div class="box box-pad" style="border-color:var(--red); color:var(--red);">
       <strong>Fehler:</strong> ${esc(e.message)}</div>`;
   }
 }
@@ -301,54 +402,46 @@ async function render() {
 // ============================================================
 
 function breadcrumb(items) {
-  return `<nav class="flex flex-wrap items-center gap-1 text-sm mb-4 text-gray-500">
+  return `<nav class="brotkrumen">
     ${items.map((item, i) => i < items.length - 1
-      ? `<a href="${esc(item.href)}" class="text-blue-600 hover:underline">${esc(item.label)}</a><span class="mx-1">›</span>`
-      : `<span class="text-gray-600">${esc(item.label)}</span>`
+      ? `<a href="${esc(item.href)}">${esc(item.label)}</a><span>›</span>`
+      : `<span>${esc(item.label)}</span>`
     ).join('')}
   </nav>`;
 }
 
 function costGrid(summary) {
   const s = summary || {};
-  const mm = s.material_mit || 0, mo = s.material_ohne || 0;
-  const pm = s.personal_mit || 0, po = s.personal_ohne || 0;
   function tile(label, mit, ohne) {
-    const g = mit + ohne;
-    return `<div class="bg-gray-50 rounded-xl p-3 border border-gray-100">
-      <div class="text-xs font-semibold uppercase text-gray-500 mb-2">${label}</div>
-      <div class="space-y-1 text-sm">
-        <div class="flex justify-between"><span class="text-gray-500">mit Rechnung</span><span class="font-medium text-green-700">${formatEuro(mit)}</span></div>
-        <div class="flex justify-between"><span class="text-gray-500">ohne Rechnung</span><span class="font-medium text-orange-600">${formatEuro(ohne)}</span></div>
-        <div class="flex justify-between border-t border-gray-200 pt-1 mt-1"><span class="font-semibold">Gesamt</span><span class="font-bold">${formatEuro(g)}</span></div>
-      </div>
+    return `<div class="karte">
+      <div class="label">${label}</div>
+      <div class="zahl">${formatEuro((mit || 0) + (ohne || 0))}</div>
+      <div class="muted">mit Rechnung: <b style="color:var(--green)">${formatEuro(mit || 0)}</b></div>
+      <div class="muted">ohne Rechnung: <b style="color:var(--red)">${formatEuro(ohne || 0)}</b></div>
     </div>`;
   }
-  return `<div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
-    ${tile('Material', mm, mo)}
-    ${tile('Personal', pm, po)}
-    ${tile('Gesamtkosten', mm + pm, mo + po)}
+  return `<div class="karten">
+    ${tile('Material', s.mat_mit, s.mat_ohne)}
+    ${tile('Personal', s.pers_mit, s.pers_ohne)}
+    ${tile('Gesamtkosten', (s.mat_mit || 0) + (s.pers_mit || 0), (s.mat_ohne || 0) + (s.pers_ohne || 0))}
   </div>`;
 }
 
-function tradeBreakdown(trades) {
-  if (!trades || !trades.length) return '';
-  const total = trades.reduce((s, t) => s + (t.gesamt || 0), 0);
-  return `<div class="bg-white rounded-xl border border-gray-100 p-4 mb-4">
-    <h3 class="font-semibold text-sm text-gray-600 mb-3 uppercase">Aufschlüsselung nach Gewerk</h3>
-    ${trades.map(t => {
+function tradeBreakdown(byTrade) {
+  if (!byTrade || !byTrade.length) return '';
+  const total = byTrade.reduce((s, t) => s + (t.gesamt || 0), 0);
+  return `<div class="box"><div class="box-kopf">Aufschlüsselung nach Gewerk</div>
+    <div class="box-inhalt">
+    ${byTrade.map(t => {
       const pct = total > 0 ? Math.round((t.gesamt || 0) / total * 100) : 0;
-      return `<div class="py-2 border-b border-gray-50 last:border-0">
-        <div class="flex justify-between text-sm mb-1">
-          <span class="font-medium">${esc(t.trade_name || 'Ohne Gewerk')}</span>
-          <span>${formatEuro(t.gesamt || 0)}</span>
+      return `<div style="margin-bottom:10px;">
+        <div style="display:flex; justify-content:space-between; font-size:14px; margin-bottom:3px;">
+          <span>${esc(t.trade_name || '(kein Gewerk)')}</span><span>${formatEuro(t.gesamt || 0)}</span>
         </div>
-        <div class="w-full bg-gray-100 rounded-full h-1.5">
-          <div class="bg-blue-500 h-1.5 rounded-full" style="width:${pct}%"></div>
-        </div>
+        <div class="balken"><div style="width:${pct}%"></div></div>
       </div>`;
     }).join('')}
-  </div>`;
+  </div></div>`;
 }
 
 // ============================================================
@@ -365,13 +458,20 @@ async function renderDashboard() {
   const selPid = urlParams.get('pid') ? parseInt(urlParams.get('pid')) : null;
   const selSid = urlParams.get('sid') ? parseInt(urlParams.get('sid')) : null;
 
-  const [projData, sitesData] = await Promise.all([
+  let apiPath = '/api/dashboard';
+  const qp = [];
+  if (selPid) qp.push('project=' + selPid);
+  if (selSid) qp.push('site=' + selSid);
+  if (qp.length) apiPath += '?' + qp.join('&');
+
+  const [dashData, projData, sitesData] = await Promise.all([
+    api('GET', apiPath),
     api('GET', '/api/projects'),
     api('GET', '/api/sites'),
   ]);
+  const d = dashData.dashboard;
   State.projects = projData.projects || [];
-  State.sites    = sitesData.sites || [];
-
+  State.sites = sitesData.sites || [];
   const filteredSites = selPid ? State.sites.filter(s => s.project_id === selPid) : State.sites;
 
   const projOpts = ['<option value="">Alle Projekte</option>',
@@ -381,60 +481,79 @@ async function renderDashboard() {
     ...filteredSites.map(s => `<option value="${s.id}" ${selSid === s.id ? 'selected' : ''}>${esc(s.name)}</option>`)
   ].join('');
 
-  let summary, summaryTitle;
-  if (selSid) {
-    const d = await api('GET', `/api/sites/${selSid}/summary`);
-    summary = d.summary;
-    const site = State.sites.find(s => s.id === selSid);
-    summaryTitle = site ? site.name : 'Baustelle #' + selSid;
-  } else if (selPid) {
-    const d = await api('GET', `/api/projects/${selPid}/summary`);
-    summary = d.summary;
-    const proj = State.projects.find(p => p.id === selPid);
-    summaryTitle = proj ? proj.name : 'Projekt #' + selPid;
-  } else {
-    const d = await api('GET', '/api/summary');
-    summary = d.summary;
-    summaryTitle = 'Alle Projekte';
-  }
+  const k = d.kpis || {};
+
+  const kpiKarten = `<div class="karten">
+    <div class="karte"><div class="label">Gesamtkosten</div>
+      <div class="zahl">${formatEuro(k.gesamt)}</div></div>
+    <div class="karte ok"><div class="label">mit Rechnung</div>
+      <div class="zahl">${formatEuro(k.gesamt_mit)}</div></div>
+    <div class="karte warn"><div class="label">ohne Rechnung</div>
+      <div class="zahl">${formatEuro(k.gesamt_ohne)}</div></div>
+    <div class="karte"><div class="label">Offene Aufgaben</div>
+      <div class="zahl">${k.offene_aufgaben || 0}</div></div>
+    <div class="karte"><div class="label">Aktive Baustellen</div>
+      <div class="zahl">${k.aktive_baustellen || 0}</div></div>
+  </div>`;
+
+  const siteMax = Math.max(1, ...(d.by_site || []).map(s => s.gesamt || 0));
+  const siteBars = (d.by_site || []).length === 0 ? '' :
+    `<div class="box"><div class="box-kopf">Kosten je Baustelle</div><div class="box-inhalt">
+      ${d.by_site.map(s => `<div style="margin-bottom:10px;">
+        <div style="display:flex; justify-content:space-between; font-size:14px; margin-bottom:3px;">
+          <a class="link" href="#/baustelle/${s.site_id}">${esc(s.site_name)}</a>
+          <span>${formatEuro(s.gesamt)} · ${s.offene_aufgaben} offen</span>
+        </div>
+        <div class="balken"><div style="width:${Math.round((s.gesamt || 0) / siteMax * 100)}%"></div></div>
+      </div>`).join('')}
+    </div></div>`;
+
+  const personTabelle = (d.by_person || []).length === 0 ? '' :
+    `<div class="box"><div class="box-kopf">Stunden &amp; Kosten je Person</div>
+      <div class="scrollx"><table>
+        <thead><tr><th>Person</th><th class="r">Stunden</th><th class="r">mit Rechnung</th>
+          <th class="r">ohne Rechnung</th><th class="r">Gesamt</th></tr></thead>
+        <tbody>${d.by_person.map(p => `<tr>
+          <td>${esc(p.person_name)}</td>
+          <td class="r">${formatZahl(p.stunden)} h</td>
+          <td class="r">${formatEuro(p.kosten_mit)}</td>
+          <td class="r">${formatEuro(p.kosten_ohne)}</td>
+          <td class="r"><b>${formatEuro(p.kosten)}</b></td>
+        </tr>`).join('')}</tbody>
+      </table></div></div>`;
+
+  const typLabel = { zeit: 'Zeit', material: 'Material', dokument: 'Dokument' };
+  const recentListe = (d.recent || []).length === 0 ? '' :
+    `<div class="box"><div class="box-kopf">Zuletzt erfasst</div><div class="box-inhalt">
+      ${d.recent.map(r => `<div class="zeile" style="display:flex; justify-content:space-between; gap:8px;">
+        <div>
+          <span class="badge">${typLabel[r.typ] || esc(r.typ)}</span>
+          ${esc(r.label)}
+          <a class="link" href="#/aufgabe/${r.task_id}">${esc(r.task_title)}</a>
+        </div>
+        <div style="white-space:nowrap;">${r.betrag != null ? formatEuro(r.betrag) : ''}</div>
+      </div>`).join('')}
+    </div></div>`;
 
   view.innerHTML = `
-    <h1 class="text-xl font-bold mb-4">Dashboard</h1>
-
-    <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-4">
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+    <h1>Dashboard</h1>
+    <div class="box box-pad">
+      <div class="grid2">
         <div>
-          <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Projekt</label>
-          <select id="dash-pid" onchange="dashFilter()" class="${SC}">${projOpts}</select>
+          <label>Projekt</label>
+          <select id="dash-pid" onchange="dashFilter()">${projOpts}</select>
         </div>
         <div>
-          <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Baustelle</label>
-          <select id="dash-sid" onchange="dashFilter()" class="${SC}">${siteOpts}</select>
+          <label>Baustelle</label>
+          <select id="dash-sid" onchange="dashFilter()">${siteOpts}</select>
         </div>
       </div>
     </div>
-
-    <h2 class="font-semibold text-gray-700 mb-2">Kosten: ${esc(summaryTitle)}</h2>
-    ${costGrid(summary)}
-    ${tradeBreakdown((summary || {}).trades || [])}
-
-    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4">
-      <a href="#/projekte" class="bg-white rounded-xl border border-gray-100 p-4 hover:shadow-md transition block">
-        <div class="text-2xl mb-1">📁</div>
-        <div class="font-semibold">Projekte</div>
-        <div class="text-sm text-gray-500">${State.projects.length} Projekt(e)</div>
-      </a>
-      <a href="#/baustellen" class="bg-white rounded-xl border border-gray-100 p-4 hover:shadow-md transition block">
-        <div class="text-2xl mb-1">🏠</div>
-        <div class="font-semibold">Baustellen</div>
-        <div class="text-sm text-gray-500">${State.sites.length} Baustelle(n)</div>
-      </a>
-      <a href="#/aufgaben" class="bg-white rounded-xl border border-gray-100 p-4 hover:shadow-md transition block">
-        <div class="text-2xl mb-1">✅</div>
-        <div class="font-semibold">Aufgaben</div>
-        <div class="text-sm text-gray-500">nach Baustelle</div>
-      </a>
-    </div>`;
+    ${kpiKarten}
+    ${tradeBreakdown(d.by_trade || [])}
+    ${siteBars}
+    ${personTabelle}
+    ${recentListe}`;
 }
 
 window.dashFilter = function() {
@@ -458,60 +577,60 @@ async function renderProjekte() {
   State.projects = projects;
 
   const cards = projects.map(p => `
-    <div class="border-b border-gray-100 py-3 last:border-0">
-      <div class="flex items-start justify-between gap-2">
-        <div class="min-w-0">
-          <a href="#/projekt/${p.id}" class="font-medium text-blue-700 hover:underline break-words">${esc(p.name)}</a>
-          ${p.note ? `<p class="text-xs text-gray-400 mt-0.5 break-words">${esc(p.note)}</p>` : ''}
-          <p class="text-sm text-gray-500 mt-1">${p.site_count != null ? p.site_count : 0} Baustelle(n) · ${formatEuro(p.total_cost)}</p>
+    <div class="zeile">
+      <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:8px;">
+        <div>
+          <a href="#/projekt/${p.id}" class="link">${esc(p.name)}</a>
+          ${p.note ? `<p class="muted">${esc(p.note)}</p>` : ''}
+          <p class="muted">${p.site_count != null ? p.site_count : 0} Baustelle(n) · ${formatEuro(p.total_cost)}</p>
         </div>
-        <div class="flex gap-2 shrink-0">
-          <button onclick="openEditProjektModal(${p.id},'${esc(p.name)}','${esc(p.note||'')}')" class="${BS} !px-3 !min-h-[44px]" aria-label="Bearbeiten">✏️</button>
-          <button onclick="deleteProjekt(${p.id})" class="${BD} !px-3 !min-h-[44px]" aria-label="Löschen">🗑</button>
+        <div style="display:flex; gap:8px; flex-shrink:0;">
+          <button onclick="openEditProjektModal(${p.id})" class="${BS} klein" aria-label="Bearbeiten">✏️</button>
+          <button onclick="deleteProjekt(${p.id})" class="${BD} klein" aria-label="Löschen">🗑</button>
         </div>
       </div>
     </div>`).join('');
 
   const tableRows = projects.map(p => `
-    <tr class="border-b border-gray-50 hover:bg-gray-50">
-      <td class="py-3 px-4"><a href="#/projekt/${p.id}" class="text-blue-700 font-medium hover:underline">${esc(p.name)}</a>
-        ${p.note ? `<p class="text-xs text-gray-400">${esc(p.note)}</p>` : ''}</td>
-      <td class="py-3 px-4 text-sm text-gray-500">${p.site_count != null ? p.site_count : 0}</td>
-      <td class="py-3 px-4 text-sm font-medium">${formatEuro(p.total_cost)}</td>
-      <td class="py-3 px-4">
-        <div class="flex gap-2 justify-end">
-          <button onclick="openEditProjektModal(${p.id},'${esc(p.name)}','${esc(p.note||'')}')" class="${BS} !px-3 !min-h-[44px]">✏️</button>
-          <button onclick="deleteProjekt(${p.id})" class="${BD} !px-3 !min-h-[44px]">🗑</button>
+    <tr>
+      <td><a href="#/projekt/${p.id}" class="link">${esc(p.name)}</a>
+        ${p.note ? `<p class="muted">${esc(p.note)}</p>` : ''}</td>
+      <td>${p.site_count != null ? p.site_count : 0}</td>
+      <td>${formatEuro(p.total_cost)}</td>
+      <td>
+        <div style="display:flex; gap:8px; justify-content:flex-end;">
+          <button onclick="openEditProjektModal(${p.id})" class="${BS} klein">✏️</button>
+          <button onclick="deleteProjekt(${p.id})" class="${BD} klein">🗑</button>
         </div>
       </td>
     </tr>`).join('');
 
   const inner = projects.length === 0 ? emptyState('Noch keine Projekte angelegt.') : `
-    <div class="sm:hidden px-4">${cards}</div>
-    <div class="hidden sm:block overflow-x-auto">
-      <table class="w-full text-left text-sm">
-        <thead class="text-xs uppercase text-gray-400 border-b border-gray-100">
-          <tr><th class="py-3 px-4">Name</th><th class="py-3 px-4">Baustellen</th><th class="py-3 px-4">Gesamtkosten</th><th class="py-3 px-4"></th></tr>
+    <div class="nur-mobil box-inhalt">${cards}</div>
+    <div class="nur-desktop scrollx">
+      <table>
+        <thead>
+          <tr><th>Name</th><th>Baustellen</th><th>Gesamtkosten</th><th></th></tr>
         </thead>
         <tbody>${tableRows}</tbody>
       </table>
     </div>`;
 
   view.innerHTML = `
-    <div class="flex items-center justify-between mb-4">
-      <h1 class="text-xl font-bold">Projekte</h1>
+    <div class="seitenkopf">
+      <h1>Projekte</h1>
       <button onclick="openNeuProjektModal()" class="${BP}">+ Neues Projekt</button>
     </div>
-    <div class="bg-white rounded-xl shadow-sm border border-gray-100">${inner}</div>`;
+    <div class="box">${inner}</div>`;
 }
 
 window.openNeuProjektModal = function() {
   openModal(`${modalHeader('Neues Projekt')}
-    <form onsubmit="submitNeuProjekt(event)" class="p-4">
-      ${formRow('Name *', `<input id="mf-pn-name" class="${IC}" required placeholder="z.B. Umbau MFH Deisterstraße 40">`)}
-      ${formRow('Notiz', `<textarea id="mf-pn-note" class="${IC} resize-none" rows="2" placeholder="Optional"></textarea>`)}
-      <div class="flex gap-3 mt-4">
-        <button type="submit" class="${BP} flex-1">Speichern</button>
+    <form onsubmit="submitNeuProjekt(event)" class="box-inhalt">
+      ${formRow('Name *', `<input id="mf-pn-name" required placeholder="z.B. Umbau MFH Deisterstraße 40">`)}
+      ${formRow('Notiz', `<textarea id="mf-pn-note" class="" rows="2" placeholder="Optional"></textarea>`)}
+      <div class="aktionen">
+        <button type="submit" class="${BP}">Speichern</button>
         <button type="button" onclick="closeModal()" class="${BS}">Abbrechen</button>
       </div>
     </form>`);
@@ -530,13 +649,18 @@ window.submitNeuProjekt = async function(e) {
   } catch(err) { showError(err.message); }
 };
 
-window.openEditProjektModal = function(pid, name, note) {
+window.openEditProjektModal = async function(pid) {
+  let p = State.projects.find(x => x.id === pid);
+  if (!p) {
+    const d = await api('GET', '/api/projects/' + pid);
+    p = d.project;
+  }
   openModal(`${modalHeader('Projekt bearbeiten')}
-    <form onsubmit="submitEditProjekt(event,${pid})" class="p-4">
-      ${formRow('Name *', `<input id="mf-pe-name" class="${IC}" required value="${esc(name)}">`)}
-      ${formRow('Notiz', `<textarea id="mf-pe-note" class="${IC} resize-none" rows="2">${esc(note)}</textarea>`)}
-      <div class="flex gap-3 mt-4">
-        <button type="submit" class="${BP} flex-1">Speichern</button>
+    <form onsubmit="submitEditProjekt(event,${pid})" class="box-inhalt">
+      ${formRow('Name *', `<input id="mf-pe-name" required value="${esc(p.name)}">`)}
+      ${formRow('Notiz', `<textarea id="mf-pe-note" rows="2">${esc(p.note || '')}</textarea>`)}
+      <div class="aktionen">
+        <button type="submit" class="${BP}">Speichern</button>
         <button type="button" onclick="closeModal()" class="${BS}">Abbrechen</button>
       </div>
     </form>`);
@@ -578,33 +702,33 @@ async function renderProjektDetail(pid) {
   const cards = sites.length === 0
     ? emptyState('Noch keine Baustellen in diesem Projekt.')
     : sites.map(s => `
-      <div class="border-b border-gray-100 py-3 last:border-0">
-        <div class="flex items-start justify-between gap-2">
-          <div class="min-w-0">
-            <a href="#/baustelle/${s.id}" class="font-medium text-blue-700 hover:underline break-words">${esc(s.name)}</a>
-            ${s.address ? `<p class="text-xs text-gray-400 break-words">${esc(s.address)}</p>` : ''}
-            <div class="mt-1">${statusBadge(s.status)}</div>
+      <div class="zeile">
+        <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:8px;">
+          <div>
+            <a href="#/baustelle/${s.id}" class="link">${esc(s.name)}</a>
+            ${s.address ? `<p class="muted">${esc(s.address)}</p>` : ''}
+            <div>${statusBadge(s.status)}</div>
           </div>
-          <div class="flex gap-2 shrink-0 flex-wrap justify-end">
-            <a href="#/baustelle/${s.id}/aufgaben" class="${BS} !px-3 !min-h-[44px] text-xs">Aufgaben</a>
-            <button onclick="deleteBaustelle(${s.id},${pid})" class="${BD} !px-3 !min-h-[44px]">🗑</button>
+          <div style="display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end;">
+            <a href="#/baustelle/${s.id}/aufgaben" class="${BS} klein">Aufgaben</a>
+            <button onclick="deleteBaustelle(${s.id},${pid})" class="${BD} klein">🗑</button>
           </div>
         </div>
       </div>`).join('');
 
   view.innerHTML = `
     ${breadcrumb([{label:'Projekte',href:'#/projekte'},{label:project.name}])}
-    <div class="flex items-center justify-between mb-2">
-      <h1 class="text-xl font-bold break-words">${esc(project.name)}</h1>
-      <button onclick="openEditProjektModal(${project.id},'${esc(project.name)}','${esc(project.note||'')}')" class="${BS} !px-3 !min-h-[44px]">✏️</button>
+    <div class="seitenkopf">
+      <h1>${esc(project.name)}</h1>
+      <button onclick="openEditProjektModal(${project.id})" class="${BS} klein">✏️</button>
     </div>
-    ${project.note ? `<p class="text-sm text-gray-500 mb-4 break-words">${esc(project.note)}</p>` : ''}
-    <div class="bg-white rounded-xl shadow-sm border border-gray-100 mb-4">
-      <div class="flex items-center justify-between px-4 py-3 border-b border-gray-100">
-        <span class="font-semibold">Baustellen (${sites.length})</span>
-        <button onclick="openNeuBaustelleModal(${pid})" class="${BP} !min-h-[36px] !py-1.5">+ Baustelle</button>
+    ${project.note ? `<p class="muted">${esc(project.note)}</p>` : ''}
+    <div class="box">
+      <div class="box-kopf">
+        <span>Baustellen (${sites.length})</span>
+        <button onclick="openNeuBaustelleModal(${pid})" class="${BP} klein">+ Baustelle</button>
       </div>
-      <div class="px-4">${cards}</div>
+      <div class="box-inhalt">${cards}</div>
     </div>`;
 }
 
@@ -631,60 +755,62 @@ async function renderBaustellen() {
     return p ? p.name : '–';
   }
 
-  const projFilter = `<select onchange="baustellenFilter(this.value)" class="${SC} max-w-xs mb-4">
+  const projFilter = `<select onchange="baustellenFilter(this.value)" class="${SC}" style="max-width:280px;">
     <option value="">Alle Projekte</option>
     ${State.projects.map(p => `<option value="${p.id}" ${filterPid===p.id?'selected':''}>${esc(p.name)}</option>`).join('')}
   </select>`;
 
   const cards = filtered.map(s => `
-    <div class="border-b border-gray-100 py-3 last:border-0">
-      <div class="flex items-start justify-between gap-2">
-        <div class="min-w-0">
-          <a href="#/baustelle/${s.id}" class="font-medium text-blue-700 hover:underline break-words">${esc(s.name)}</a>
-          ${s.address ? `<p class="text-xs text-gray-400 break-words">${esc(s.address)}</p>` : ''}
-          <p class="text-xs text-gray-400">${esc(projName(s))}</p>
-          <div class="mt-1">${statusBadge(s.status)}</div>
+    <div class="zeile">
+      <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:8px;">
+        <div>
+          <a href="#/baustelle/${s.id}" class="link">${esc(s.name)}</a>
+          ${s.address ? `<p class="muted">${esc(s.address)}</p>` : ''}
+          <p class="muted">${esc(projName(s))}</p>
+          <p class="muted">${formatEuro(s.total_cost)} · ${s.open_task_count} offen</p>
+          <div>${statusBadge(s.status)}</div>
         </div>
-        <div class="flex gap-2 shrink-0 flex-wrap justify-end">
-          <a href="#/baustelle/${s.id}/aufgaben" class="${BS} !px-3 !min-h-[44px] text-xs">Aufgaben</a>
-          <button onclick="deleteBaustelle(${s.id})" class="${BD} !px-3 !min-h-[44px]">🗑</button>
+        <div style="display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end;">
+          <a href="#/baustelle/${s.id}/aufgaben" class="${BS} klein">Aufgaben</a>
+          <button onclick="deleteBaustelle(${s.id})" class="${BD} klein">🗑</button>
         </div>
       </div>
     </div>`).join('');
 
   const tableRows = filtered.map(s => `
-    <tr class="border-b border-gray-50 hover:bg-gray-50">
-      <td class="py-3 px-4"><a href="#/baustelle/${s.id}" class="text-blue-700 font-medium hover:underline">${esc(s.name)}</a></td>
-      <td class="py-3 px-4 text-sm text-gray-500 break-words">${esc(s.address||'–')}</td>
-      <td class="py-3 px-4 text-sm">${esc(projName(s))}</td>
-      <td class="py-3 px-4">${statusBadge(s.status)}</td>
-      <td class="py-3 px-4">
-        <div class="flex gap-2 justify-end">
-          <a href="#/baustelle/${s.id}/aufgaben" class="${BS} !px-3 !min-h-[44px] text-xs">Aufgaben</a>
-          <button onclick="deleteBaustelle(${s.id})" class="${BD} !px-3 !min-h-[44px]">🗑</button>
+    <tr>
+      <td><a href="#/baustelle/${s.id}" class="link">${esc(s.name)}</a></td>
+      <td>${esc(s.address||'–')}</td>
+      <td>${esc(projName(s))}</td>
+      <td>${statusBadge(s.status)}</td>
+      <td>${formatEuro(s.total_cost)}</td>
+      <td>
+        <div style="display:flex; gap:8px; justify-content:flex-end;">
+          <a href="#/baustelle/${s.id}/aufgaben" class="${BS} klein">Aufgaben</a>
+          <button onclick="deleteBaustelle(${s.id})" class="${BD} klein">🗑</button>
         </div>
       </td>
     </tr>`).join('');
 
   const inner = filtered.length === 0
     ? emptyState('Keine Baustellen gefunden.')
-    : `<div class="sm:hidden px-4">${cards}</div>
-       <div class="hidden sm:block overflow-x-auto">
-         <table class="w-full text-left text-sm">
-           <thead class="text-xs uppercase text-gray-400 border-b border-gray-100">
-             <tr><th class="py-3 px-4">Name</th><th class="py-3 px-4">Adresse</th><th class="py-3 px-4">Projekt</th><th class="py-3 px-4">Status</th><th class="py-3 px-4"></th></tr>
+    : `<div class="nur-mobil box-inhalt">${cards}</div>
+       <div class="nur-desktop scrollx">
+         <table>
+           <thead>
+             <tr><th>Name</th><th>Adresse</th><th>Projekt</th><th>Status</th><th>Kosten</th><th></th></tr>
            </thead>
            <tbody>${tableRows}</tbody>
          </table>
        </div>`;
 
   view.innerHTML = `
-    <div class="flex items-center justify-between mb-4">
-      <h1 class="text-xl font-bold">Baustellen</h1>
+    <div class="seitenkopf">
+      <h1>Baustellen</h1>
       <button onclick="openNeuBaustelleModal()" class="${BP}">+ Baustelle</button>
     </div>
     ${projFilter}
-    <div class="bg-white rounded-xl shadow-sm border border-gray-100">${inner}</div>`;
+    <div class="box">${inner}</div>`;
 }
 
 window.baustellenFilter = function(pid) {
@@ -704,18 +830,18 @@ window.openNeuBaustelleModal = async function(preselectedPid) {
     `<option value="${p.id}" ${p.id == preselectedPid ? 'selected' : ''}>${esc(p.name)}</option>`
   ).join('');
   openModal(`${modalHeader('Neue Baustelle')}
-    <form onsubmit="submitNeuBaustelle(event)" class="p-4">
-      ${formRow('Name *', `<input id="mf-bn-name" class="${IC}" required placeholder="z.B. MFH Deisterstraße 40">`)}
-      ${formRow('Adresse', `<input id="mf-bn-addr" class="${IC}" placeholder="Straße, Ort">`)}
+    <form onsubmit="submitNeuBaustelle(event)" class="box-inhalt">
+      ${formRow('Name *', `<input id="mf-bn-name" required placeholder="z.B. MFH Deisterstraße 40">`)}
+      ${formRow('Adresse', `<input id="mf-bn-addr" placeholder="Straße, Ort">`)}
       ${formRow('Projekt *', `<select id="mf-bn-pid" class="${SC}" required>
         <option value="">– Projekt wählen –</option>${projOpts}</select>`)}
       ${formRow('Status', `<select id="mf-bn-status" class="${SC}">
         <option value="aktiv">Aktiv</option>
         <option value="abgeschlossen">Abgeschlossen</option>
       </select>`)}
-      ${formRow('Notiz', `<textarea id="mf-bn-note" class="${IC} resize-none" rows="2" placeholder="Optional"></textarea>`)}
-      <div class="flex gap-3 mt-4">
-        <button type="submit" class="${BP} flex-1">Speichern</button>
+      ${formRow('Notiz', `<textarea id="mf-bn-note" class="" rows="2" placeholder="Optional"></textarea>`)}
+      <div class="aktionen">
+        <button type="submit" class="${BP}">Speichern</button>
         <button type="button" onclick="closeModal()" class="${BS}">Abbrechen</button>
       </div>
     </form>`);
@@ -770,48 +896,50 @@ async function renderBaustelleDetail(sid) {
   }
   const proj = State.projects.find(p => p.id === site.project_id);
 
+  ViewData.trades = trades;
+
   const tradeCards = trades.length === 0
     ? emptyState('Noch keine Gewerke angelegt.')
     : trades.map(t => `
-      <div class="border-b border-gray-100 py-3 last:border-0">
-        <div class="flex items-center justify-between gap-2">
-          <div class="min-w-0">
-            <a href="#/baustelle/${sid}/aufgaben?trade=${t.id}" class="font-medium text-blue-700 hover:underline">${esc(t.name)}</a>
-            ${t.task_count != null ? `<p class="text-xs text-gray-400">${t.task_count} Aufgabe(n) · ${formatEuro(t.gesamt||0)}</p>` : ''}
+      <div class="zeile">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+          <div>
+            <a href="#/baustelle/${sid}/aufgaben?trade=${t.id}" class="link">${esc(t.name)}</a>
+            ${t.task_count != null ? `<p class="muted">${t.task_count} Aufgabe(n) · ${formatEuro(t.gesamt||0)}</p>` : ''}
           </div>
-          <div class="flex gap-2 shrink-0">
-            <button onclick="openEditGewerk(${t.id},'${esc(t.name)}')" class="${BS} !px-3 !min-h-[44px]">✏️</button>
-            <button onclick="deleteGewerk(${t.id},${sid})" class="${BD} !px-3 !min-h-[44px]">🗑</button>
+          <div style="display:flex; gap:8px; flex-shrink:0;">
+            <button onclick="openEditGewerk(${t.id})" class="${BS} klein">✏️</button>
+            <button onclick="deleteGewerk(${t.id},${sid})" class="${BD} klein">🗑</button>
           </div>
         </div>
       </div>`).join('');
 
   view.innerHTML = `
     ${breadcrumb([{label:'Baustellen',href:'#/baustellen'},{label:site.name}])}
-    <div class="flex items-center justify-between mb-2">
-      <h1 class="text-xl font-bold break-words">${esc(site.name)}</h1>
-      <button onclick="openEditBaustelleModal(${sid})" class="${BS} !px-3 !min-h-[44px]">✏️</button>
+    <div class="seitenkopf">
+      <h1>${esc(site.name)}</h1>
+      <button onclick="openEditBaustelleModal(${sid})" class="${BS} klein">✏️</button>
     </div>
-    ${site.address ? `<p class="text-sm text-gray-500 mb-1 break-words">📍 ${esc(site.address)}</p>` : ''}
-    <div class="flex flex-wrap gap-2 mb-4">
+    ${site.address ? `<p class="muted">${esc(site.address)}</p>` : ''}
+    <div class="aktionen">
       ${statusBadge(site.status)}
-      ${proj ? `<span class="text-xs text-gray-500 self-center">Projekt: <a href="#/projekt/${proj.id}" class="text-blue-600 hover:underline">${esc(proj.name)}</a></span>` : ''}
+      ${proj ? `<span class="muted">Projekt: <a href="#/projekt/${proj.id}" class="link">${esc(proj.name)}</a></span>` : ''}
     </div>
-    <div class="flex flex-wrap gap-2 mb-4">
+    <div class="aktionen">
       <a href="#/baustelle/${sid}/aufgaben" class="${BP}">Aufgaben</a>
       <a href="#/baustelle/${sid}/dokumente" class="${BS}">Dokumente</a>
     </div>
 
-    <h2 class="font-semibold text-gray-700 mb-2">Kostenübersicht</h2>
+    <h2>Kostenübersicht</h2>
     ${costGrid(summary)}
-    ${tradeBreakdown((summary||{}).trades||[])}
+    ${tradeBreakdown((summary||{}).by_trade||[])}
 
-    <div class="bg-white rounded-xl shadow-sm border border-gray-100 mt-4">
-      <div class="flex items-center justify-between px-4 py-3 border-b border-gray-100">
-        <span class="font-semibold">Gewerke (${trades.length})</span>
-        <button onclick="openNeuGewerkModal(${sid})" class="${BP} !min-h-[36px] !py-1.5">+ Gewerk</button>
+    <div class="box">
+      <div class="box-kopf">
+        <span>Gewerke (${trades.length})</span>
+        <button onclick="openNeuGewerkModal(${sid})" class="${BP} klein">+ Gewerk</button>
       </div>
-      <div class="px-4">${tradeCards}</div>
+      <div class="box-inhalt">${tradeCards}</div>
     </div>`;
 }
 
@@ -826,17 +954,17 @@ window.openEditBaustelleModal = async function(sid) {
     `<option value="${p.id}" ${p.id === s.project_id ? 'selected' : ''}>${esc(p.name)}</option>`
   ).join('');
   openModal(`${modalHeader('Baustelle bearbeiten')}
-    <form onsubmit="submitEditBaustelle(event,${sid})" class="p-4">
-      ${formRow('Name *', `<input id="mf-be-name" class="${IC}" required value="${esc(s.name)}">`)}
-      ${formRow('Adresse', `<input id="mf-be-addr" class="${IC}" value="${esc(s.address||'')}">`)}
+    <form onsubmit="submitEditBaustelle(event,${sid})" class="box-inhalt">
+      ${formRow('Name *', `<input id="mf-be-name" required value="${esc(s.name)}">`)}
+      ${formRow('Adresse', `<input id="mf-be-addr" value="${esc(s.address||'')}">`)}
       ${formRow('Projekt', `<select id="mf-be-pid" class="${SC}">${projOpts}</select>`)}
       ${formRow('Status', `<select id="mf-be-status" class="${SC}">
         <option value="aktiv" ${s.status==='aktiv'?'selected':''}>Aktiv</option>
         <option value="abgeschlossen" ${s.status==='abgeschlossen'?'selected':''}>Abgeschlossen</option>
       </select>`)}
-      ${formRow('Notiz', `<textarea id="mf-be-note" class="${IC} resize-none" rows="2">${esc(s.note||'')}</textarea>`)}
-      <div class="flex gap-3 mt-4">
-        <button type="submit" class="${BP} flex-1">Speichern</button>
+      ${formRow('Notiz', `<textarea id="mf-be-note" class="" rows="2">${esc(s.note||'')}</textarea>`)}
+      <div class="aktionen">
+        <button type="submit" class="${BP}">Speichern</button>
         <button type="button" onclick="closeModal()" class="${BS}">Abbrechen</button>
       </div>
     </form>`);
@@ -865,14 +993,14 @@ window.submitEditBaustelle = async function(e, sid) {
 window.openNeuGewerkModal = function(sid) {
   const suggestions = ['Maurer','Elektro','Sanitär','Trockenbau','Dach','Fenster','Maler','Böden','Heizung'];
   openModal(`${modalHeader('Gewerk hinzufügen')}
-    <form onsubmit="submitNeuGewerk(event,${sid})" class="p-4">
-      ${formRow('Name *', `<input id="mf-gn-name" class="${IC}" required placeholder="z.B. Maurer">`)}
-      <div class="flex flex-wrap gap-2 mb-4">
+    <form onsubmit="submitNeuGewerk(event,${sid})" class="box-inhalt">
+      ${formRow('Name *', `<input id="mf-gn-name" required placeholder="z.B. Maurer">`)}
+      <div class="aktionen">
         ${suggestions.map(s => `<button type="button" onclick="document.getElementById('mf-gn-name').value='${s}'"
-          class="px-3 py-2 min-h-[44px] rounded-full bg-gray-100 text-sm hover:bg-blue-100 hover:text-blue-700 transition">${s}</button>`).join('')}
+          class="btn hell klein">${s}</button>`).join('')}
       </div>
-      <div class="flex gap-3">
-        <button type="submit" class="${BP} flex-1">Hinzufügen</button>
+      <div class="aktionen">
+        <button type="submit" class="${BP}">Hinzufügen</button>
         <button type="button" onclick="closeModal()" class="${BS}">Abbrechen</button>
       </div>
     </form>`);
@@ -888,12 +1016,14 @@ window.submitNeuGewerk = async function(e, sid) {
   } catch(err) { showError(err.message); }
 };
 
-window.openEditGewerk = function(tid, name) {
+window.openEditGewerk = function(tid) {
+  const t = (ViewData.trades || []).find(x => x.id === tid);
+  if (!t) { showError('Gewerk nicht gefunden.'); return; }
   openModal(`${modalHeader('Gewerk umbenennen')}
-    <form onsubmit="submitEditGewerk(event,${tid})" class="p-4">
-      ${formRow('Name *', `<input id="mf-ge-name" class="${IC}" required value="${esc(name)}">`)}
-      <div class="flex gap-3 mt-4">
-        <button type="submit" class="${BP} flex-1">Speichern</button>
+    <form onsubmit="submitEditGewerk(event,${tid})" class="box-inhalt">
+      ${formRow('Name *', `<input id="mf-ge-name" required value="${esc(t.name)}">`)}
+      <div class="aktionen">
+        <button type="submit" class="${BP}">Speichern</button>
         <button type="button" onclick="closeModal()" class="${BS}">Abbrechen</button>
       </div>
     </form>`);
@@ -916,6 +1046,136 @@ window.deleteGewerk = async function(tid, sid) {
     showToast('Gewerk gelöscht.', 'success');
     await renderBaustelleDetail(sid);
   } catch(err) { showError(err.message); }
+};
+
+// ============================================================
+// VIEW: PERSONEN (#/personen)
+// ============================================================
+
+async function renderPersonen() {
+  const view = document.getElementById('view');
+  view.innerHTML = loadingSpinner();
+  const data = await api('GET', '/api/persons');
+  const persons = data.persons || [];
+  ViewData.persons = persons;
+
+  const zeilen = persons.map(p => `
+    <tr style="${p.active ? '' : 'opacity:.5;'}">
+      <td>${esc(p.name)}${p.note ? `<div class="muted">${esc(p.note)}</div>` : ''}</td>
+      <td class="r">${formatEuro(p.hourly_rate)}/h</td>
+      <td class="r">${formatZahl(p.sum_hours)} h</td>
+      <td class="r">${formatEuro(p.sum_cost)}</td>
+      <td>${p.active ? '<span class="badge aktiv">aktiv</span>' : '<span class="badge abgeschlossen">inaktiv</span>'}</td>
+      <td><div style="display:flex; gap:4px; justify-content:flex-end;">
+        <button onclick="openEditPersonModal(${p.id})" class="${BS} klein">✏️</button>
+        <button onclick="deletePerson(${p.id})" class="${BD} klein">🗑</button>
+      </div></td>
+    </tr>`).join('');
+
+  const karten = persons.map(p => `
+    <div class="zeile" style="${p.active ? '' : 'opacity:.5;'}">
+      <div style="display:flex; justify-content:space-between; gap:8px;">
+        <div>
+          <b>${esc(p.name)}</b> · ${formatEuro(p.hourly_rate)}/h
+          <div class="muted">${formatZahl(p.sum_hours)} h · ${formatEuro(p.sum_cost)}
+            ${p.active ? '' : ' · inaktiv'}</div>
+        </div>
+        <div style="display:flex; gap:4px;">
+          <button onclick="openEditPersonModal(${p.id})" class="${BS} klein">✏️</button>
+          <button onclick="deletePerson(${p.id})" class="${BD} klein">🗑</button>
+        </div>
+      </div>
+    </div>`).join('');
+
+  const inner = persons.length === 0
+    ? emptyState('Noch keine Personen angelegt.')
+    : `<div class="nur-mobil box-inhalt">${karten}</div>
+       <div class="nur-desktop scrollx">
+         <table>
+           <thead><tr><th>Name</th><th class="r">Standard-Satz</th><th class="r">Σ Stunden</th>
+             <th class="r">Σ Kosten</th><th>Status</th><th></th></tr></thead>
+           <tbody>${zeilen}</tbody>
+         </table>
+       </div>`;
+
+  view.innerHTML = `
+    <div class="seitenkopf">
+      <h1>Personen</h1>
+      <button onclick="openNeuPersonModal()" class="${BP}">+ Neue Person</button>
+    </div>
+    <div class="box">${inner}</div>`;
+}
+
+window.openNeuPersonModal = function() {
+  openModal(`${modalHeader('Neue Person')}
+    <form onsubmit="submitNeuPerson(event)" class="box-inhalt">
+      ${formRow('Name *', `<input id="mf-psn-name" required placeholder="z.B. Robert">`)}
+      ${formRow('Standard-Stundensatz (€/h)', `<input id="mf-psn-rate" type="number" step="0.5" min="0" value="0">`)}
+      ${formRow('Notiz', `<textarea id="mf-psn-note" rows="2" placeholder="Optional"></textarea>`)}
+      <div class="aktionen">
+        <button type="submit" class="${BP}">Speichern</button>
+        <button type="button" onclick="closeModal()" class="${BS}">Abbrechen</button>
+      </div>
+    </form>`);
+};
+
+window.submitNeuPerson = async function(e) {
+  e.preventDefault();
+  try {
+    await api('POST', '/api/persons', {
+      name: document.getElementById('mf-psn-name').value.trim(),
+      hourly_rate: parseFloat(document.getElementById('mf-psn-rate').value) || 0,
+      note: document.getElementById('mf-psn-note').value.trim() || null,
+    });
+    showToast('Person angelegt.', 'success');
+    closeModal();
+    await renderPersonen();
+  } catch (err) { showError(err.message); }
+};
+
+window.openEditPersonModal = function(pid) {
+  const p = (ViewData.persons || []).find(x => x.id === pid);
+  if (!p) { showError('Person nicht gefunden.'); return; }
+  openModal(`${modalHeader('Person bearbeiten')}
+    <form onsubmit="submitEditPerson(event,${pid})" class="box-inhalt">
+      ${formRow('Name *', `<input id="mf-pse-name" required value="${esc(p.name)}">`)}
+      ${formRow('Standard-Stundensatz (€/h)', `<input id="mf-pse-rate" type="number" step="0.5" min="0" value="${p.hourly_rate}">`)}
+      ${formRow('Status', `<select id="mf-pse-active">
+        <option value="1" ${p.active ? 'selected' : ''}>aktiv</option>
+        <option value="0" ${p.active ? '' : 'selected'}>inaktiv</option>
+      </select>`)}
+      ${formRow('Notiz', `<textarea id="mf-pse-note" rows="2">${esc(p.note || '')}</textarea>`)}
+      <div class="aktionen">
+        <button type="submit" class="${BP}">Speichern</button>
+        <button type="button" onclick="closeModal()" class="${BS}">Abbrechen</button>
+      </div>
+    </form>`);
+};
+
+window.submitEditPerson = async function(e, pid) {
+  e.preventDefault();
+  try {
+    await api('PUT', '/api/persons/' + pid, {
+      name: document.getElementById('mf-pse-name').value.trim(),
+      hourly_rate: parseFloat(document.getElementById('mf-pse-rate').value) || 0,
+      active: parseInt(document.getElementById('mf-pse-active').value),
+      note: document.getElementById('mf-pse-note').value.trim() || null,
+    });
+    showToast('Person aktualisiert.', 'success');
+    closeModal();
+    await renderPersonen();
+  } catch (err) { showError(err.message); }
+};
+
+window.deletePerson = async function(pid) {
+  if (!confirm('Person wirklich löschen?')) return;
+  try {
+    await api('DELETE', '/api/persons/' + pid);
+    showToast('Person gelöscht.', 'success');
+    await renderPersonen();
+  } catch (err) {
+    showError(err.message);  // 409-Meldung enthält den Deaktivieren-Hinweis
+  }
 };
 
 // ============================================================
@@ -957,36 +1217,36 @@ async function renderAufgaben(sid) {
     ['offen','in Arbeit','fertig'].map(s => `<option value="${s}" ${filterStatus===s?'selected':''}>${s}</option>`).join('');
 
   const cards = tasks.map(t => `
-    <div class="border-b border-gray-100 py-3 last:border-0">
-      <div class="flex items-start justify-between gap-2">
-        <div class="min-w-0">
-          <a href="#/aufgabe/${t.id}" class="font-medium text-blue-700 hover:underline break-words">${esc(t.title)}</a>
-          <div class="flex flex-wrap gap-1 mt-1">
+    <div class="zeile">
+      <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:8px;">
+        <div>
+          <a href="#/aufgabe/${t.id}" class="link">${esc(t.title)}</a>
+          <div style="display:flex; flex-wrap:wrap; gap:4px; align-items:center;">
             ${statusBadge(t.status)}
-            <span class="text-xs text-gray-400 self-center">${esc(tradeName(t.trade_id))}</span>
+            <span class="muted">${esc(tradeName(t.trade_id))}</span>
           </div>
-          ${t.total_cost != null ? `<p class="text-xs text-gray-500 mt-0.5">Kosten: ${formatEuro(t.total_cost)}</p>` : ''}
+          ${t.total_cost != null ? `<p class="muted">Kosten: ${formatEuro(t.total_cost)}</p>` : ''}
         </div>
-        <a href="#/aufgabe/${t.id}" class="${BS} !px-3 !min-h-[44px] shrink-0 text-xs">Detail</a>
+        <a href="#/aufgabe/${t.id}" class="${BS} klein" style="flex-shrink:0;">Detail</a>
       </div>
     </div>`).join('');
 
   const tableRows = tasks.map(t => `
-    <tr class="border-b border-gray-50 hover:bg-gray-50">
-      <td class="py-3 px-4"><a href="#/aufgabe/${t.id}" class="text-blue-700 hover:underline break-words">${esc(t.title)}</a></td>
-      <td class="py-3 px-4 text-sm">${esc(tradeName(t.trade_id))}</td>
-      <td class="py-3 px-4">${statusBadge(t.status)}</td>
-      <td class="py-3 px-4 text-sm">${t.total_cost != null ? formatEuro(t.total_cost) : '–'}</td>
-      <td class="py-3 px-4"><a href="#/aufgabe/${t.id}" class="${BS} !px-3 !min-h-[44px] text-xs">Detail</a></td>
+    <tr>
+      <td><a href="#/aufgabe/${t.id}" class="link">${esc(t.title)}</a></td>
+      <td>${esc(tradeName(t.trade_id))}</td>
+      <td>${statusBadge(t.status)}</td>
+      <td>${t.total_cost != null ? formatEuro(t.total_cost) : '–'}</td>
+      <td><a href="#/aufgabe/${t.id}" class="${BS} klein">Detail</a></td>
     </tr>`).join('');
 
   const inner = tasks.length === 0
     ? emptyState('Keine Aufgaben gefunden.')
-    : `<div class="sm:hidden px-4">${cards}</div>
-       <div class="hidden sm:block overflow-x-auto">
-         <table class="w-full text-left text-sm">
-           <thead class="text-xs uppercase text-gray-400 border-b border-gray-100">
-             <tr><th class="py-3 px-4">Titel</th><th class="py-3 px-4">Gewerk</th><th class="py-3 px-4">Status</th><th class="py-3 px-4">Kosten</th><th class="py-3 px-4"></th></tr>
+    : `<div class="nur-mobil box-inhalt">${cards}</div>
+       <div class="nur-desktop scrollx">
+         <table>
+           <thead>
+             <tr><th>Titel</th><th>Gewerk</th><th>Status</th><th>Kosten</th><th></th></tr>
            </thead>
            <tbody>${tableRows}</tbody>
          </table>
@@ -994,15 +1254,15 @@ async function renderAufgaben(sid) {
 
   view.innerHTML = `
     ${breadcrumb([{label:'Baustellen',href:'#/baustellen'},{label:site.name,href:'#/baustelle/'+sid},{label:'Aufgaben'}])}
-    <div class="flex items-center justify-between mb-4">
-      <h1 class="text-xl font-bold">Aufgaben</h1>
+    <div class="seitenkopf">
+      <h1>Aufgaben</h1>
       <button onclick="openNeuAufgabeModal(${sid})" class="${BP}">+ Aufgabe</button>
     </div>
-    <div class="flex flex-wrap gap-3 mb-4">
-      <select onchange="aufgabenFilter(${sid},'trade',this.value)" class="${SC} max-w-[180px]">${tradeOpts}</select>
-      <select onchange="aufgabenFilter(${sid},'status',this.value)" class="${SC} max-w-[160px]">${statusOpts}</select>
+    <div class="aktionen">
+      <select onchange="aufgabenFilter(${sid},'trade',this.value)" class="${SC}" style="max-width:180px;">${tradeOpts}</select>
+      <select onchange="aufgabenFilter(${sid},'status',this.value)" class="${SC}" style="max-width:160px;">${statusOpts}</select>
     </div>
-    <div class="bg-white rounded-xl shadow-sm border border-gray-100">${inner}</div>`;
+    <div class="box">${inner}</div>`;
 }
 
 window.aufgabenFilter = function(sid, key, val) {
@@ -1019,16 +1279,16 @@ window.aufgabenFilter = function(sid, key, val) {
 
 async function renderAufgabenGesamt() {
   const view = document.getElementById('view');
-  view.innerHTML = `<h1 class="text-xl font-bold mb-4">Aufgaben</h1>
-    <p class="text-gray-500 mb-4">Bitte eine Baustelle wählen:</p>`;
+  view.innerHTML = `<h1>Aufgaben</h1>
+    <p class="muted">Bitte eine Baustelle wählen:</p>`;
   const data = await api('GET', '/api/sites');
   const sites = data.sites || [];
   if (!sites.length) { view.innerHTML += emptyState('Noch keine Baustellen angelegt.'); return; }
-  view.innerHTML += sites.map(s => `
-    <a href="#/baustelle/${s.id}/aufgaben" class="block bg-white rounded-xl border border-gray-100 p-4 hover:shadow-md transition mb-2">
-      <span class="font-medium text-blue-700">${esc(s.name)}</span>
-      ${s.address ? `<span class="text-xs text-gray-400 ml-2">${esc(s.address)}</span>` : ''}
-    </a>`).join('');
+  view.innerHTML += `<div class="box"><div class="box-inhalt">` + sites.map(s => `
+    <a href="#/baustelle/${s.id}/aufgaben" class="zeile" style="display:block; text-decoration:none; color:inherit;">
+      <span class="link">${esc(s.name)}</span>
+      ${s.address ? `<div class="muted">${esc(s.address)}</div>` : ''}
+    </a>`).join('') + `</div></div>`;
 }
 
 // ============================================================
@@ -1041,17 +1301,17 @@ window.openNeuAufgabeModal = async function(sid) {
   const tradeOpts = '<option value="">Kein Gewerk</option>' +
     trades.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join('');
   openModal(`${modalHeader('Neue Aufgabe')}
-    <form onsubmit="submitNeuAufgabe(event,${sid})" class="p-4">
-      ${formRow('Titel *', `<input id="mf-an-title" class="${IC}" required placeholder="z.B. Wand ziehen">`)}
+    <form onsubmit="submitNeuAufgabe(event,${sid})" class="box-inhalt">
+      ${formRow('Titel *', `<input id="mf-an-title" required placeholder="z.B. Wand ziehen">`)}
       ${formRow('Gewerk', `<select id="mf-an-trade" class="${SC}">${tradeOpts}</select>`)}
       ${formRow('Status', `<select id="mf-an-status" class="${SC}">
         <option value="offen">offen</option>
         <option value="in Arbeit">in Arbeit</option>
         <option value="fertig">fertig</option>
       </select>`)}
-      ${formRow('Beschreibung', `<textarea id="mf-an-desc" class="${IC} resize-none" rows="3" placeholder="Optional"></textarea>`)}
-      <div class="flex gap-3 mt-4">
-        <button type="submit" class="${BP} flex-1">Speichern</button>
+      ${formRow('Beschreibung', `<textarea id="mf-an-desc" class="" rows="3" placeholder="Optional"></textarea>`)}
+      <div class="aktionen">
+        <button type="submit" class="${BP}">Speichern</button>
         <button type="button" onclick="closeModal()" class="${BS}">Abbrechen</button>
       </div>
     </form>`);
@@ -1101,39 +1361,39 @@ async function renderAufgabeDetail(taskId) {
 
   // --- Zeiteinträge ---
   const timeCards = times.map(e => `
-    <div class="bg-gray-50 rounded-lg p-3">
-      <div class="flex justify-between items-start gap-2">
-        <div class="min-w-0">
-          <span class="font-medium text-sm">${esc(e.person)}</span>
-          ${e.work_date ? `<span class="text-xs text-gray-400 ml-2">${esc(e.work_date)}</span>` : ''}
-          <p class="text-xs text-gray-500 mt-0.5">${e.hours} h × ${formatEuro(e.hourly_rate)}/h = <span class="font-semibold">${formatEuro(e.kosten)}</span></p>
-          <div class="mt-1">${billedBadge(e.billed)}</div>
+    <div class="zeile">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">
+        <div>
+          <span style="font-weight:bold;">${esc(e.person)}</span>
+          ${e.work_date ? `<span class="muted">${esc(formatDatum(e.work_date))}</span>` : ''}
+          <p class="muted">${formatZahl(e.hours)} h × ${formatEuro(e.hourly_rate)}/h = <span style="font-weight:bold;">${formatEuro(e.kosten)}</span></p>
+          <div>${billedBadge(e.billed)}</div>
         </div>
-        <div class="flex gap-1 shrink-0">
-          <button onclick="openEditTimeEntry(${e.id},${taskId})" class="${BS} !px-2 !min-h-[44px]">✏️</button>
-          <button onclick="deleteTimeEntry(${e.id},${taskId})" class="${BD} !px-2 !min-h-[44px]">🗑</button>
+        <div style="display:flex; gap:4px; flex-shrink:0;">
+          <button onclick="openEditTimeEntry(${e.id},${taskId})" class="${BS} klein">✏️</button>
+          <button onclick="deleteTimeEntry(${e.id},${taskId})" class="${BD} klein">🗑</button>
         </div>
       </div>
     </div>`).join('');
 
-  const timeTable = `<div class="hidden sm:block overflow-x-auto">
-    <table class="w-full text-sm">
-      <thead class="text-xs text-gray-400 uppercase border-b border-gray-100">
-        <tr><th class="py-2 px-3 text-left">Person</th><th class="py-2 px-3 text-left">Datum</th>
-          <th class="py-2 px-3 text-right">Stunden</th><th class="py-2 px-3 text-right">Satz</th>
-          <th class="py-2 px-3 text-right">Kosten</th><th class="py-2 px-3 text-left">Rechnung</th><th></th></tr>
+  const timeTable = `<div class="nur-desktop scrollx">
+    <table>
+      <thead>
+        <tr><th>Person</th><th>Datum</th>
+          <th class="r">Stunden</th><th class="r">Satz</th>
+          <th class="r">Kosten</th><th>Rechnung</th><th></th></tr>
       </thead>
       <tbody>
-        ${times.map(e => `<tr class="border-b border-gray-50">
-          <td class="py-2 px-3">${esc(e.person)}</td>
-          <td class="py-2 px-3 text-gray-400">${esc(e.work_date||'–')}</td>
-          <td class="py-2 px-3 text-right">${e.hours}</td>
-          <td class="py-2 px-3 text-right">${formatEuro(e.hourly_rate)}</td>
-          <td class="py-2 px-3 text-right font-medium">${formatEuro(e.kosten)}</td>
-          <td class="py-2 px-3">${billedBadge(e.billed)}</td>
-          <td class="py-2 px-3"><div class="flex gap-1 justify-end">
-            <button onclick="openEditTimeEntry(${e.id},${taskId})" class="${BS} !px-2 !min-h-[44px]">✏️</button>
-            <button onclick="deleteTimeEntry(${e.id},${taskId})" class="${BD} !px-2 !min-h-[44px]">🗑</button>
+        ${times.map(e => `<tr>
+          <td>${esc(e.person)}</td>
+          <td>${esc(e.work_date ? formatDatum(e.work_date) : '–')}</td>
+          <td class="r">${formatZahl(e.hours)}</td>
+          <td class="r">${formatEuro(e.hourly_rate)}</td>
+          <td class="r">${formatEuro(e.kosten)}</td>
+          <td>${billedBadge(e.billed)}</td>
+          <td><div style="display:flex; gap:4px; justify-content:flex-end;">
+            <button onclick="openEditTimeEntry(${e.id},${taskId})" class="${BS} klein">✏️</button>
+            <button onclick="deleteTimeEntry(${e.id},${taskId})" class="${BD} klein">🗑</button>
           </div></td>
         </tr>`).join('')}
       </tbody>
@@ -1141,43 +1401,43 @@ async function renderAufgabeDetail(taskId) {
   </div>`;
 
   const timeHTML = times.length === 0
-    ? `<p class="text-sm text-gray-400">Noch keine Zeiteinträge.</p>`
-    : `<div class="sm:hidden space-y-3">${timeCards}</div>${timeTable}`;
+    ? `<p class="muted">Noch keine Zeiteinträge.</p>`
+    : `<div class="nur-mobil">${timeCards}</div>${timeTable}`;
 
   // --- Material ---
   const matCards = mats.map(m => `
-    <div class="bg-gray-50 rounded-lg p-3">
-      <div class="flex justify-between items-start gap-2">
-        <div class="min-w-0">
-          <span class="font-medium text-sm break-words">${esc(m.name)}</span>
-          <p class="text-xs text-gray-500 mt-0.5">${m.qty} ${esc(m.unit||'Stk')} × ${formatEuro(m.unit_price)} = <span class="font-semibold">${formatEuro(m.kosten)}</span></p>
-          <div class="mt-1">${billedBadge(m.billed)}</div>
+    <div class="zeile">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">
+        <div>
+          <span style="font-weight:bold;">${esc(m.name)}</span>
+          <p class="muted">${formatZahl(m.qty)} ${esc(m.unit||'Stk')} × ${formatEuro(m.unit_price)} = <span style="font-weight:bold;">${formatEuro(m.kosten)}</span></p>
+          <div>${billedBadge(m.billed)}</div>
         </div>
-        <div class="flex gap-1 shrink-0">
-          <button onclick="openEditMaterial(${m.id},${taskId})" class="${BS} !px-2 !min-h-[44px]">✏️</button>
-          <button onclick="deleteMaterial(${m.id},${taskId})" class="${BD} !px-2 !min-h-[44px]">🗑</button>
+        <div style="display:flex; gap:4px; flex-shrink:0;">
+          <button onclick="openEditMaterial(${m.id},${taskId})" class="${BS} klein">✏️</button>
+          <button onclick="deleteMaterial(${m.id},${taskId})" class="${BD} klein">🗑</button>
         </div>
       </div>
     </div>`).join('');
 
-  const matTable = `<div class="hidden sm:block overflow-x-auto">
-    <table class="w-full text-sm">
-      <thead class="text-xs text-gray-400 uppercase border-b border-gray-100">
-        <tr><th class="py-2 px-3 text-left">Bezeichnung</th><th class="py-2 px-3 text-right">Menge</th>
-          <th class="py-2 px-3 text-left">Einheit</th><th class="py-2 px-3 text-right">Einzelpreis</th>
-          <th class="py-2 px-3 text-right">Summe</th><th class="py-2 px-3 text-left">Rechnung</th><th></th></tr>
+  const matTable = `<div class="nur-desktop scrollx">
+    <table>
+      <thead>
+        <tr><th>Bezeichnung</th><th class="r">Menge</th>
+          <th>Einheit</th><th class="r">Einzelpreis</th>
+          <th class="r">Summe</th><th>Rechnung</th><th></th></tr>
       </thead>
       <tbody>
-        ${mats.map(m => `<tr class="border-b border-gray-50">
-          <td class="py-2 px-3 break-words">${esc(m.name)}</td>
-          <td class="py-2 px-3 text-right">${m.qty}</td>
-          <td class="py-2 px-3">${esc(m.unit||'Stk')}</td>
-          <td class="py-2 px-3 text-right">${formatEuro(m.unit_price)}</td>
-          <td class="py-2 px-3 text-right font-medium">${formatEuro(m.kosten)}</td>
-          <td class="py-2 px-3">${billedBadge(m.billed)}</td>
-          <td class="py-2 px-3"><div class="flex gap-1 justify-end">
-            <button onclick="openEditMaterial(${m.id},${taskId})" class="${BS} !px-2 !min-h-[44px]">✏️</button>
-            <button onclick="deleteMaterial(${m.id},${taskId})" class="${BD} !px-2 !min-h-[44px]">🗑</button>
+        ${mats.map(m => `<tr>
+          <td>${esc(m.name)}</td>
+          <td class="r">${formatZahl(m.qty)}</td>
+          <td>${esc(m.unit||'Stk')}</td>
+          <td class="r">${formatEuro(m.unit_price)}</td>
+          <td class="r">${formatEuro(m.kosten)}</td>
+          <td>${billedBadge(m.billed)}</td>
+          <td><div style="display:flex; gap:4px; justify-content:flex-end;">
+            <button onclick="openEditMaterial(${m.id},${taskId})" class="${BS} klein">✏️</button>
+            <button onclick="deleteMaterial(${m.id},${taskId})" class="${BD} klein">🗑</button>
           </div></td>
         </tr>`).join('')}
       </tbody>
@@ -1185,27 +1445,27 @@ async function renderAufgabeDetail(taskId) {
   </div>`;
 
   const matHTML = mats.length === 0
-    ? `<p class="text-sm text-gray-400">Noch keine Materialpositionen.</p>`
-    : `<div class="sm:hidden space-y-3">${matCards}</div>${matTable}`;
+    ? `<p class="muted">Noch keine Materialpositionen.</p>`
+    : `<div class="nur-mobil">${matCards}</div>${matTable}`;
 
   // --- Dokumente ---
   const docGrid = docs.length === 0
-    ? `<p class="text-sm text-gray-400">Noch keine Dokumente.</p>`
-    : `<div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+    ? `<p class="muted">Noch keine Dokumente.</p>`
+    : `<div class="galerie">
         ${docs.map(d => {
           const isImg = d.mime && d.mime.startsWith('image/');
           const thumb = isImg
-            ? `<img src="/api/documents/${d.id}/file" alt="${esc(d.filename)}" loading="lazy" class="w-full h-24 object-cover rounded-lg">`
-            : `<div class="w-full h-24 bg-gray-100 rounded-lg flex items-center justify-center text-3xl">📄</div>`;
+            ? `<img src="/api/documents/${d.id}/file" alt="${esc(d.filename)}" loading="lazy" class="thumb">`
+            : `<div class="thumb">PDF</div>`;
           const plBtn = d.paperless_url
-            ? `<a href="${esc(d.paperless_url)}" target="_blank" rel="noopener" class="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">✓ Paperless</a>`
-            : (State.paperlessEnabled ? `<button onclick="sendToPaperless(${d.id},${taskId})" class="text-xs text-blue-600 hover:underline min-h-[32px]">→ Paperless</button>` : '');
-          return `<div class="relative group">
+            ? `<a href="${esc(d.paperless_url)}" target="_blank" rel="noopener" class="badge mit">✓ Paperless</a>`
+            : (State.paperlessEnabled ? `<button onclick="sendToPaperless(${d.id},${taskId})" class="btn-link">→ Paperless</button>` : '');
+          return `<div style="position:relative;">
             <a href="/api/documents/${d.id}/file" target="_blank" rel="noopener">${thumb}</a>
-            <p class="text-xs text-gray-500 mt-1 truncate" title="${esc(d.filename)}">${esc(d.filename)}</p>
-            <div class="flex flex-wrap gap-1 mt-0.5 items-center">${plBtn}</div>
+            <p class="muted" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${esc(d.filename)}">${esc(d.filename)}</p>
+            <div style="display:flex; flex-wrap:wrap; gap:4px; align-items:center;">${plBtn}</div>
             <button onclick="deleteDoc(${d.id},${taskId})"
-              class="absolute top-1 right-1 w-7 h-7 bg-red-500 text-white rounded-full text-xs opacity-0 group-hover:opacity-100 transition flex items-center justify-center" aria-label="Löschen">✕</button>
+              class="btn rot klein" style="position:absolute; top:4px; right:4px;" aria-label="Löschen">✕</button>
           </div>`;
         }).join('')}
       </div>`;
@@ -1218,61 +1478,59 @@ async function renderAufgabeDetail(taskId) {
       {label:task.title}
     ])}
 
-    <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-4">
-      <div class="flex flex-wrap items-start gap-3 justify-between">
-        <div class="min-w-0">
-          <h1 class="text-xl font-bold break-words">${esc(task.title)}</h1>
-          <div class="flex flex-wrap gap-2 mt-2">
+    <div class="box box-pad">
+      <div style="display:flex; flex-wrap:wrap; align-items:flex-start; justify-content:space-between; gap:12px;">
+        <div>
+          <h1>${esc(task.title)}</h1>
+          <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:8px;">
             ${statusBadge(task.status)}
-            <span class="text-sm text-gray-500 self-center">${esc(tradeName(task.trade_id))}</span>
+            <span class="muted">${esc(tradeName(task.trade_id))}</span>
           </div>
-          ${task.description ? `<p class="text-sm text-gray-600 mt-2 break-words whitespace-pre-wrap">${esc(task.description)}</p>` : ''}
+          ${task.description ? `<p class="muted" style="white-space:pre-wrap;">${esc(task.description)}</p>` : ''}
         </div>
-        <button onclick="openEditAufgabeModal(${taskId})" class="${BS} shrink-0">✏️ Bearbeiten</button>
+        <button onclick="openEditAufgabeModal(${taskId})" class="${BS}">✏️ Bearbeiten</button>
       </div>
 
-      <div class="mt-4 flex flex-wrap gap-2 items-center border-t border-gray-100 pt-3">
-        <span class="text-sm text-gray-500">Status:</span>
+      <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:16px; border-top:1px solid var(--line); padding-top:12px;">
+        <span class="muted">Status:</span>
         ${['offen','in Arbeit','fertig'].map(s =>
           `<button onclick="changeStatus(${taskId},'${s}')"
-            class="min-h-[44px] px-3 py-2 rounded-lg text-sm border transition ${task.status===s?'bg-blue-600 text-white border-blue-600':'border-gray-300 hover:bg-gray-50'}">${s}</button>`
+            class="${task.status === s ? 'btn klein' : 'btn hell klein'}">${s}</button>`
         ).join('')}
       </div>
     </div>
 
-    <div class="bg-blue-50 border border-blue-100 rounded-xl p-4 mb-4">
-      <div class="grid grid-cols-3 gap-3 text-center">
-        <div><p class="text-xs text-gray-500 uppercase mb-1">Material</p><p class="font-bold">${formatEuro(kosten.material)}</p></div>
-        <div><p class="text-xs text-gray-500 uppercase mb-1">Personal</p><p class="font-bold">${formatEuro(kosten.personal)}</p></div>
-        <div><p class="text-xs text-gray-500 uppercase mb-1">Gesamt</p><p class="font-bold text-blue-700 text-lg">${formatEuro(kosten.gesamt)}</p></div>
-      </div>
+    <div class="karten">
+      <div class="karte"><div class="label">Material</div><div class="zahl">${formatEuro(kosten.material)}</div></div>
+      <div class="karte"><div class="label">Personal</div><div class="zahl">${formatEuro(kosten.personal)}</div></div>
+      <div class="karte ok"><div class="label">Gesamt</div><div class="zahl">${formatEuro(kosten.gesamt)}</div></div>
     </div>
 
-    <div class="bg-white rounded-xl shadow-sm border border-gray-100 mb-4">
-      <div class="flex items-center justify-between px-4 py-3 border-b border-gray-100">
-        <span class="font-semibold">Zeiten (Personal)</span>
-        <button onclick="openNeuTimeEntry(${taskId})" class="${BP} !min-h-[36px] !py-1.5">+ Zeit erfassen</button>
+    <div class="box">
+      <div class="box-kopf">
+        <span>Zeiten (Personal)</span>
+        <button onclick="openNeuTimeEntry(${taskId})" class="${BP} klein">+ Zeit erfassen</button>
       </div>
-      <div class="p-4">${timeHTML}</div>
+      <div class="box-inhalt">${timeHTML}</div>
     </div>
 
-    <div class="bg-white rounded-xl shadow-sm border border-gray-100 mb-4">
-      <div class="flex items-center justify-between px-4 py-3 border-b border-gray-100">
-        <span class="font-semibold">Material</span>
-        <button onclick="openNeuMaterial(${taskId})" class="${BP} !min-h-[36px] !py-1.5">+ Materialposition</button>
+    <div class="box">
+      <div class="box-kopf">
+        <span>Material</span>
+        <button onclick="openNeuMaterial(${taskId})" class="${BP} klein">+ Materialposition</button>
       </div>
-      <div class="p-4">${matHTML}</div>
+      <div class="box-inhalt">${matHTML}</div>
     </div>
 
-    <div class="bg-white rounded-xl shadow-sm border border-gray-100 mb-4">
-      <div class="flex items-center justify-between px-4 py-3 border-b border-gray-100">
-        <span class="font-semibold">Dokumente &amp; Fotos</span>
-        <button onclick="openUploadModal(${taskId},null)" class="${BP} !min-h-[36px] !py-1.5">+ Hochladen</button>
+    <div class="box">
+      <div class="box-kopf">
+        <span>Dokumente &amp; Fotos</span>
+        <button onclick="openUploadModal(${taskId},null)" class="${BP} klein">+ Hochladen</button>
       </div>
-      <div class="p-4">${docGrid}</div>
+      <div class="box-inhalt">${docGrid}</div>
     </div>
 
-    <button onclick="deleteAufgabe(${taskId},${task.site_id})" class="${BD} w-full mt-2">Aufgabe löschen</button>`;
+    <button onclick="deleteAufgabe(${taskId},${task.site_id})" class="${BD}" style="width:100%; margin-top:8px;">Aufgabe löschen</button>`;
 }
 
 window.changeStatus = async function(taskId, status) {
@@ -1302,17 +1560,17 @@ window.openEditAufgabeModal = async function(taskId) {
   const tradeOpts = '<option value="">Kein Gewerk</option>' +
     trades.map(t => `<option value="${t.id}" ${t.id===task.trade_id?'selected':''}>${esc(t.name)}</option>`).join('');
   openModal(`${modalHeader('Aufgabe bearbeiten')}
-    <form onsubmit="submitEditAufgabe(event,${taskId})" class="p-4">
-      ${formRow('Titel *', `<input id="mf-ae-title" class="${IC}" required value="${esc(task.title)}">`)}
+    <form onsubmit="submitEditAufgabe(event,${taskId})" class="box-inhalt">
+      ${formRow('Titel *', `<input id="mf-ae-title" required value="${esc(task.title)}">`)}
       ${formRow('Gewerk', `<select id="mf-ae-trade" class="${SC}">${tradeOpts}</select>`)}
       ${formRow('Status', `<select id="mf-ae-status" class="${SC}">
         <option value="offen" ${task.status==='offen'?'selected':''}>offen</option>
         <option value="in Arbeit" ${task.status==='in Arbeit'?'selected':''}>in Arbeit</option>
         <option value="fertig" ${task.status==='fertig'?'selected':''}>fertig</option>
       </select>`)}
-      ${formRow('Beschreibung', `<textarea id="mf-ae-desc" class="${IC} resize-none" rows="3">${esc(task.description||'')}</textarea>`)}
-      <div class="flex gap-3 mt-4">
-        <button type="submit" class="${BP} flex-1">Speichern</button>
+      ${formRow('Beschreibung', `<textarea id="mf-ae-desc" class="" rows="3">${esc(task.description||'')}</textarea>`)}
+      <div class="aktionen">
+        <button type="submit" class="${BP}">Speichern</button>
         <button type="button" onclick="closeModal()" class="${BS}">Abbrechen</button>
       </div>
     </form>`);
@@ -1340,58 +1598,138 @@ window.submitEditAufgabe = async function(e, taskId) {
 
 let _teBilled = 1;
 
-window.openNeuTimeEntry = function(taskId) {
-  _teBilled = 1;
-  openModal(`${modalHeader('Zeit erfassen')}
-    <form onsubmit="submitNeuTimeEntry(event,${taskId})" class="p-4">
-      ${formRow('Person *', `<input id="mf-tn-person" class="${IC}" required placeholder="Name">`)}
-      ${formRow('Datum', `<input id="mf-tn-date" type="date" class="${IC}">`)}
-      <div class="grid grid-cols-2 gap-3">
-        ${formRow('Stunden *', `<input id="mf-tn-hours" type="number" step="0.25" min="0.25" class="${IC}" required placeholder="z.B. 8">`)}
-        ${formRow('Stundensatz (€) *', `<input id="mf-tn-rate" type="number" step="0.01" min="0" class="${IC}" required placeholder="z.B. 45">`)}
+function _personOpts(persons, selectedId) {
+  return persons.map(p =>
+    `<option value="${p.id}" data-rate="${p.hourly_rate}"
+      ${p.id === selectedId ? 'selected' : ''}>${esc(p.name)} (${formatEuro(p.hourly_rate)}/h)${
+        p.active === 0 ? ' – inaktiv' : ''}</option>`
+  ).join('');
+}
+
+window.tePersonChanged = function() {
+  const sel = document.getElementById('mf-te-person-sel');
+  const opt = sel.options[sel.selectedIndex];
+  if (opt && opt.dataset.rate !== undefined) {
+    document.getElementById('mf-te-rate').value = opt.dataset.rate;
+  }
+};
+
+window.teQuickAddPerson = async function() {
+  const name = (document.getElementById('mf-te-neu-name').value || '').trim();
+  const rate = parseFloat(document.getElementById('mf-te-neu-rate').value) || 0;
+  if (!name) { showError('Name für neue Person fehlt.'); return; }
+  try {
+    const res = await api('POST', '/api/persons', { name, hourly_rate: rate });
+    const d = await api('GET', '/api/persons?active=1');
+    ViewData.activePersons = d.persons || [];
+    const sel = document.getElementById('mf-te-person-sel');
+    if (sel) {
+      sel.innerHTML = _personOpts(ViewData.activePersons, res.id);
+      tePersonChanged();
+    } else {
+      // Freitext-Fallback (noch keine Personen vorhanden): kein <select> im Formular,
+      // also die neue Person direkt ins Freitextfeld übernehmen statt abzustürzen.
+      const txt = document.getElementById('mf-te-person-txt');
+      if (txt) txt.value = name;
+    }
+    document.getElementById('mf-te-neu-name').value = '';
+    document.getElementById('mf-te-neu-rate').value = '';
+    showToast('Person angelegt.', 'success');
+  } catch (err) { showError(err.message); }
+};
+
+function _timeEntryFormHTML(entry) {
+  // entry = null (neu) oder bestehender Eintrag (bearbeiten)
+  const persons = ViewData.activePersons || [];
+  const freitextFallback = persons.length === 0 && !entry;
+  const personRow = freitextFallback
+    ? formRow('Person *', `<input id="mf-te-person-txt" required placeholder="Name">`)
+    : formRow('Person *', `
+        <select id="mf-te-person-sel" onchange="tePersonChanged()">
+          ${entry && !entry.person_id
+            ? `<option value="" selected>Freitext: ${esc(entry.person)}</option>` : ''}
+          ${_personOpts(persons, entry ? entry.person_id : null)}
+        </select>`);
+  return `
+    ${personRow}
+    <div class="zeile">
+      <div class="muted" style="margin-bottom:4px;">Schnellanlage neue Person:</div>
+      <div style="display:flex; gap:6px;">
+        <input id="mf-te-neu-name" placeholder="Name" style="flex:2;">
+        <input id="mf-te-neu-rate" type="number" step="0.5" min="0" placeholder="€/h" style="flex:1;">
+        <button type="button" onclick="teQuickAddPerson()" class="${BS} klein">+</button>
       </div>
-      ${formRow('Rechnungs-Flag', billedToggleHTML(1,'setTEBilled'))}
-      <div class="flex gap-3 mt-4">
-        <button type="submit" class="${BP} flex-1">Speichern</button>
+    </div>
+    ${formRow('Datum', `<input id="mf-te-date" type="date" value="${entry ? esc(entry.work_date || '') : ''}">`)}
+    <div class="grid2">
+      ${formRow('Stunden *', `<input id="mf-te-hours" type="number" step="0.25" min="0.25" required value="${entry ? entry.hours : ''}" placeholder="z.B. 8">`)}
+      ${formRow('Stundensatz (€/h) *', `<input id="mf-te-rate" type="number" step="0.01" min="0" required value="${entry ? entry.hourly_rate : ''}" placeholder="z.B. 45">`)}
+    </div>
+    ${formRow('Rechnungs-Flag', billedToggleHTML(entry ? entry.billed : 1, 'setTEBilled'))}`;
+}
+
+function _timeEntryPayload() {
+  const payload = {
+    hours: parseFloat(document.getElementById('mf-te-hours').value),
+    hourly_rate: parseFloat(document.getElementById('mf-te-rate').value),
+    billed: _teBilled,
+    work_date: document.getElementById('mf-te-date').value || null,
+  };
+  const sel = document.getElementById('mf-te-person-sel');
+  if (sel) {
+    if (sel.value) payload.person_id = parseInt(sel.value);
+    // leerer Wert = "Freitext beibehalten" (nur beim Bearbeiten möglich)
+  } else {
+    payload.person = document.getElementById('mf-te-person-txt').value.trim();
+  }
+  return payload;
+}
+
+window.setTEBilled = function(val) { _teBilled = val; updateBilledToggle(val); };
+
+window.openNeuTimeEntry = async function(taskId) {
+  _teBilled = 1;
+  const d = await api('GET', '/api/persons?active=1');
+  ViewData.activePersons = d.persons || [];
+  openModal(`${modalHeader('Zeit erfassen')}
+    <form onsubmit="submitNeuTimeEntry(event,${taskId})" class="box-inhalt">
+      ${_timeEntryFormHTML(null)}
+      <div class="aktionen">
+        <button type="submit" class="${BP}">Speichern</button>
         <button type="button" onclick="closeModal()" class="${BS}">Abbrechen</button>
       </div>
     </form>`);
+  tePersonChanged();  // Satz der ersten Person vorbefüllen
 };
-
-window.setTEBilled = function(val) { _teBilled = val; updateBilledToggle(val); };
 
 window.submitNeuTimeEntry = async function(e, taskId) {
   e.preventDefault();
   try {
-    await api('POST', '/api/tasks/' + taskId + '/timeentries', {
-      person:      document.getElementById('mf-tn-person').value.trim(),
-      hours:       parseFloat(document.getElementById('mf-tn-hours').value),
-      hourly_rate: parseFloat(document.getElementById('mf-tn-rate').value),
-      billed:      _teBilled,
-      work_date:   document.getElementById('mf-tn-date').value || null,
-    });
+    await api('POST', '/api/tasks/' + taskId + '/timeentries', _timeEntryPayload());
     showToast('Zeiteintrag gespeichert.', 'success');
     closeModal();
     await renderAufgabeDetail(taskId);
-  } catch(err) { showError(err.message); }
+  } catch (err) { showError(err.message); }
 };
 
 window.openEditTimeEntry = async function(eid, taskId) {
-  const d = await api('GET', '/api/tasks/' + taskId + '/timeentries');
-  const entry = (d.time_entries||[]).find(e => e.id === eid);
+  const [d, pd] = await Promise.all([
+    api('GET', '/api/tasks/' + taskId + '/timeentries'),
+    api('GET', '/api/persons'),   // ALLE, siehe unten
+  ]);
+  const entry = (d.time_entries || []).find(e => e.id === eid);
   if (!entry) { showError('Eintrag nicht gefunden.'); return; }
+  // Ist die Person des Eintrags inaktiv, fehlt sie in der Aktiv-Liste; der
+  // Browser wählt dann die erste andere Person und "Speichern" hängt den
+  // Eintrag stillschweigend um. Darum: aktive Personen + die des Eintrags.
+  ViewData.activePersons = (pd.persons || [])
+    .filter(p => p.active || p.id === entry.person_id);
   _teBilled = entry.billed;
   openModal(`${modalHeader('Zeiteintrag bearbeiten')}
-    <form onsubmit="submitEditTimeEntry(event,${eid},${taskId})" class="p-4">
-      ${formRow('Person *', `<input id="mf-te-person" class="${IC}" required value="${esc(entry.person)}">`)}
-      ${formRow('Datum', `<input id="mf-te-date" type="date" class="${IC}" value="${esc(entry.work_date||'')}">`)}
-      <div class="grid grid-cols-2 gap-3">
-        ${formRow('Stunden *', `<input id="mf-te-hours" type="number" step="0.25" min="0.25" class="${IC}" required value="${entry.hours}">`)}
-        ${formRow('Stundensatz (€) *', `<input id="mf-te-rate" type="number" step="0.01" min="0" class="${IC}" required value="${entry.hourly_rate}">`)}
-      </div>
-      ${formRow('Rechnungs-Flag', billedToggleHTML(entry.billed,'setTEBilled'))}
-      <div class="flex gap-3 mt-4">
-        <button type="submit" class="${BP} flex-1">Speichern</button>
+    <form onsubmit="submitEditTimeEntry(event,${eid},${taskId})" class="box-inhalt">
+      ${_timeEntryFormHTML(entry)}
+      <div class="aktionen">
+        <button type="submit" class="${BP}">Speichern</button>
         <button type="button" onclick="closeModal()" class="${BS}">Abbrechen</button>
       </div>
     </form>`);
@@ -1400,17 +1738,11 @@ window.openEditTimeEntry = async function(eid, taskId) {
 window.submitEditTimeEntry = async function(e, eid, taskId) {
   e.preventDefault();
   try {
-    await api('PUT', '/api/timeentries/' + eid, {
-      person:      document.getElementById('mf-te-person').value.trim(),
-      hours:       parseFloat(document.getElementById('mf-te-hours').value),
-      hourly_rate: parseFloat(document.getElementById('mf-te-rate').value),
-      billed:      _teBilled,
-      work_date:   document.getElementById('mf-te-date').value || null,
-    });
+    await api('PUT', '/api/timeentries/' + eid, _timeEntryPayload());
     showToast('Zeiteintrag aktualisiert.', 'success');
     closeModal();
     await renderAufgabeDetail(taskId);
-  } catch(err) { showError(err.message); }
+  } catch (err) { showError(err.message); }
 };
 
 window.deleteTimeEntry = async function(eid, taskId) {
@@ -1436,16 +1768,16 @@ const UNIT_DATALIST = `<datalist id="unit-dl">
 window.openNeuMaterial = function(taskId) {
   _matBilled = 1;
   openModal(`${modalHeader('Materialposition hinzufügen')}
-    <form onsubmit="submitNeuMaterial(event,${taskId})" class="p-4">
-      ${formRow('Bezeichnung *', `<input id="mf-mn-name" class="${IC}" required placeholder="z.B. Ziegelsteine">`)}
-      <div class="grid grid-cols-2 gap-3">
-        ${formRow('Menge *', `<input id="mf-mn-qty" type="number" step="0.001" min="0" class="${IC}" required placeholder="z.B. 100">`)}
-        ${formRow('Einheit', `<input id="mf-mn-unit" class="${IC}" placeholder="Stk, m², kg …" list="unit-dl">${UNIT_DATALIST}`)}
+    <form onsubmit="submitNeuMaterial(event,${taskId})" class="box-inhalt">
+      ${formRow('Bezeichnung *', `<input id="mf-mn-name" required placeholder="z.B. Ziegelsteine">`)}
+      <div class="grid2">
+        ${formRow('Menge *', `<input id="mf-mn-qty" type="number" step="0.001" min="0" required placeholder="z.B. 100">`)}
+        ${formRow('Einheit', `<input id="mf-mn-unit" placeholder="Stk, m², kg …" list="unit-dl">${UNIT_DATALIST}`)}
       </div>
-      ${formRow('Einzelpreis (€) *', `<input id="mf-mn-price" type="number" step="0.01" min="0" class="${IC}" required placeholder="z.B. 0.50">`)}
+      ${formRow('Einzelpreis (€) *', `<input id="mf-mn-price" type="number" step="0.01" min="0" required placeholder="z.B. 0.50">`)}
       ${formRow('Rechnungs-Flag', billedToggleHTML(1,'setMatBilled'))}
-      <div class="flex gap-3 mt-4">
-        <button type="submit" class="${BP} flex-1">Speichern</button>
+      <div class="aktionen">
+        <button type="submit" class="${BP}">Speichern</button>
         <button type="button" onclick="closeModal()" class="${BS}">Abbrechen</button>
       </div>
     </form>`);
@@ -1475,17 +1807,17 @@ window.openEditMaterial = async function(mid, taskId) {
   if (!m) { showError('Position nicht gefunden.'); return; }
   _matBilled = m.billed;
   openModal(`${modalHeader('Materialposition bearbeiten')}
-    <form onsubmit="submitEditMaterial(event,${mid},${taskId})" class="p-4">
-      ${formRow('Bezeichnung *', `<input id="mf-me-name" class="${IC}" required value="${esc(m.name)}">`)}
-      <div class="grid grid-cols-2 gap-3">
-        ${formRow('Menge *', `<input id="mf-me-qty" type="number" step="0.001" min="0" class="${IC}" required value="${m.qty}">`)}
-        ${formRow('Einheit', `<input id="mf-me-unit" class="${IC}" value="${esc(m.unit||'')}" list="unit-dl2">
+    <form onsubmit="submitEditMaterial(event,${mid},${taskId})" class="box-inhalt">
+      ${formRow('Bezeichnung *', `<input id="mf-me-name" required value="${esc(m.name)}">`)}
+      <div class="grid2">
+        ${formRow('Menge *', `<input id="mf-me-qty" type="number" step="0.001" min="0" required value="${m.qty}">`)}
+        ${formRow('Einheit', `<input id="mf-me-unit" value="${esc(m.unit||'')}" list="unit-dl2">
           <datalist id="unit-dl2"><option value="Stk"><option value="m²"><option value="m"><option value="kg"><option value="l"></datalist>`)}
       </div>
-      ${formRow('Einzelpreis (€) *', `<input id="mf-me-price" type="number" step="0.01" min="0" class="${IC}" required value="${m.unit_price}">`)}
+      ${formRow('Einzelpreis (€) *', `<input id="mf-me-price" type="number" step="0.01" min="0" required value="${m.unit_price}">`)}
       ${formRow('Rechnungs-Flag', billedToggleHTML(m.billed,'setMatBilled'))}
-      <div class="flex gap-3 mt-4">
-        <button type="submit" class="${BP} flex-1">Speichern</button>
+      <div class="aktionen">
+        <button type="submit" class="${BP}">Speichern</button>
         <button type="button" onclick="closeModal()" class="${BS}">Abbrechen</button>
       </div>
     </form>`);
@@ -1522,17 +1854,16 @@ window.deleteMaterial = async function(mid, taskId) {
 
 window.openUploadModal = function(taskId, materialId) {
   openModal(`${modalHeader('Dokument / Foto hochladen')}
-    <form onsubmit="submitUpload(event,${taskId!=null?taskId:'null'},${materialId!=null?materialId:'null'})" class="p-4">
+    <form onsubmit="submitUpload(event,${taskId!=null?taskId:'null'},${materialId!=null?materialId:'null'})" class="box-inhalt">
       ${formRow('Datei * (Bild oder PDF, max. 20 MB)',
-        `<input id="mf-ul-file" type="file" accept="image/*,.pdf" capture="environment"
-          class="${IC} py-2 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-sm file:bg-blue-50 file:text-blue-700" required>`)}
+        `<input id="mf-ul-file" type="file" accept="image/*,.pdf" capture="environment" required>`)}
       ${formRow('Typ', `<select id="mf-ul-type" class="${SC}">
         <option value="beleg">Beleg</option>
         <option value="rechnung">Rechnung</option>
         <option value="foto">Foto</option>
       </select>`)}
-      <div class="flex gap-3 mt-4">
-        <button type="submit" class="${BP} flex-1">Hochladen</button>
+      <div class="aktionen">
+        <button type="submit" class="${BP}">Hochladen</button>
         <button type="button" onclick="closeModal()" class="${BS}">Abbrechen</button>
       </div>
     </form>`);
@@ -1601,46 +1932,46 @@ async function renderDokumente(sid) {
   const site = siteData.site;
   const docs = docsData.documents || [];
 
-  const typeFilter = `<div class="flex flex-wrap gap-2 mb-4">
+  const typeFilter = `<div class="aktionen">
     ${['','rechnung','beleg','foto'].map(t => `
       <button onclick="dokTypeFilter(${sid},'${t}')"
-        class="min-h-[44px] px-4 py-2 rounded-lg text-sm border transition ${filterType===t?'bg-blue-600 text-white border-blue-600':'border-gray-300 bg-white hover:bg-gray-50'}">
+        class="${filterType===t ? 'btn klein' : 'btn hell klein'}">
         ${t || 'Alle'}
       </button>`).join('')}
   </div>`;
 
   const gallery = docs.length === 0
     ? emptyState('Keine Dokumente gefunden.')
-    : `<div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+    : `<div class="galerie">
         ${docs.map(d => {
           const isImg = d.mime && d.mime.startsWith('image/');
           const thumb = isImg
-            ? `<img src="/api/documents/${d.id}/file" alt="${esc(d.filename)}" loading="lazy" class="w-full h-28 object-cover rounded-xl">`
-            : `<div class="w-full h-28 bg-gray-100 rounded-xl flex items-center justify-center text-4xl">📄</div>`;
+            ? `<img src="/api/documents/${d.id}/file" alt="${esc(d.filename)}" loading="lazy" class="thumb">`
+            : `<div class="thumb">PDF</div>`;
           const plBtn = d.paperless_url
-            ? `<a href="${esc(d.paperless_url)}" target="_blank" rel="noopener" class="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">✓ Paperless</a>`
-            : (State.paperlessEnabled ? `<button onclick="sendToPaperless(${d.id},null)" class="text-xs text-blue-600 hover:underline min-h-[32px]">→ Paperless</button>` : '');
-          return `<div class="relative group">
+            ? `<a href="${esc(d.paperless_url)}" target="_blank" rel="noopener" class="badge mit">✓ Paperless</a>`
+            : (State.paperlessEnabled ? `<button onclick="sendToPaperless(${d.id},null)" class="btn-link">→ Paperless</button>` : '');
+          return `<div style="position:relative;">
             <a href="/api/documents/${d.id}/file" target="_blank" rel="noopener">${thumb}</a>
-            <p class="text-xs text-gray-500 mt-1 truncate" title="${esc(d.filename)}">${esc(d.filename)}</p>
-            <div class="flex flex-wrap gap-1 mt-0.5 items-center">
-              <span class="text-xs bg-gray-100 px-1.5 py-0.5 rounded">${esc(d.doc_type||'')}</span>
-              ${d.task_id ? `<a href="#/aufgabe/${d.task_id}" class="text-xs text-blue-600 hover:underline">Aufgabe #${d.task_id}</a>` : ''}
+            <p class="muted" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${esc(d.filename)}">${esc(d.filename)}</p>
+            <div style="display:flex; flex-wrap:wrap; gap:4px; align-items:center;">
+              <span class="badge">${esc(d.doc_type||'')}</span>
+              ${d.task_id ? `<a href="#/aufgabe/${d.task_id}" class="link">Aufgabe #${d.task_id}</a>` : ''}
               ${plBtn}
             </div>
             <button onclick="deleteDocSite(${d.id},${sid})"
-              class="absolute top-1 right-1 w-7 h-7 bg-red-500 text-white rounded-full text-xs opacity-0 group-hover:opacity-100 transition flex items-center justify-center" aria-label="Löschen">✕</button>
+              class="btn rot klein" style="position:absolute; top:4px; right:4px;" aria-label="Löschen">✕</button>
           </div>`;
         }).join('')}
       </div>`;
 
   view.innerHTML = `
     ${breadcrumb([{label:'Baustellen',href:'#/baustellen'},{label:site.name,href:'#/baustelle/'+sid},{label:'Dokumente'}])}
-    <div class="flex items-center justify-between mb-4">
-      <h1 class="text-xl font-bold">Dokumente – ${esc(site.name)}</h1>
+    <div class="seitenkopf">
+      <h1>Dokumente – ${esc(site.name)}</h1>
     </div>
     ${typeFilter}
-    <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4">${gallery}</div>`;
+    <div class="box box-pad">${gallery}</div>`;
 }
 
 window.dokTypeFilter = function(sid, type) {
@@ -1662,17 +1993,16 @@ window.deleteDocSite = async function(docId, sid) {
 
 async function renderDokumenteGesamt() {
   const view = document.getElementById('view');
-  view.innerHTML = `<h1 class="text-xl font-bold mb-4">Dokumente</h1>
-    <p class="text-gray-500 mb-4">Bitte eine Baustelle wählen:</p>`;
+  view.innerHTML = `<h1>Dokumente</h1>
+    <p class="muted">Bitte eine Baustelle wählen:</p>`;
   const data = await api('GET', '/api/sites');
   const sites = data.sites || [];
   if (!sites.length) { view.innerHTML += emptyState('Noch keine Baustellen angelegt.'); return; }
-  view.innerHTML += sites.map(s => `
-    <a href="#/baustelle/${s.id}/dokumente"
-      class="block bg-white rounded-xl border border-gray-100 p-4 hover:shadow-md transition mb-2">
-      <span class="font-medium text-blue-700">${esc(s.name)}</span>
-      ${s.address ? `<span class="text-xs text-gray-400 ml-2">${esc(s.address)}</span>` : ''}
-    </a>`).join('');
+  view.innerHTML += `<div class="box"><div class="box-inhalt">` + sites.map(s => `
+    <a href="#/baustelle/${s.id}/dokumente" class="zeile" style="display:block; text-decoration:none; color:inherit;">
+      <span class="link">${esc(s.name)}</span>
+      ${s.address ? `<div class="muted">${esc(s.address)}</div>` : ''}
+    </a>`).join('') + `</div></div>`;
 }
 
 // ============================================================

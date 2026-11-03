@@ -8,13 +8,18 @@ Starten: python server.py (Port aus TOOL_PORT, Standard 5000)
 """
 
 import json
+import logging
+import math
 import mimetypes
 import os
+import sqlite3
 import time
+from datetime import date
 from pathlib import Path
 
 import requests
 from flask import Flask, jsonify, request, send_from_directory
+from werkzeug.exceptions import HTTPException
 from werkzeug.utils import secure_filename
 
 import db
@@ -23,7 +28,11 @@ import db
 # App-Konfiguration
 # ---------------------------------------------------------------------------
 
-app = Flask(__name__, static_folder=".")
+# static_folder=None ist Absicht: mit static_folder="." liefert Flask unter der
+# Route "/./<pfad>" jede Datei des Projektverzeichnisses aus — inklusive
+# data/baulog.db und config.local.json (Paperless-Token). index.html wird
+# stattdessen über die eigene "/"-Route ausgeliefert.
+app = Flask(__name__, static_folder=None)
 
 UPLOADS_DIR = os.path.join(os.path.dirname(__file__), "data", "uploads")
 
@@ -38,6 +47,13 @@ CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.local.json")
 
 # Gültige Dokumenttypen
 VALID_DOC_TYPES = {"rechnung", "beleg", "foto"}
+
+# Gültige Status-Werte für Baustellen und Aufgaben
+VALID_SITE_STATUS = {"aktiv", "abgeschlossen"}
+VALID_TASK_STATUS = {"offen", "in Arbeit", "fertig"}
+
+# Obergrenze für Freitextfelder (Namen, Notizen, Beschreibungen)
+MAX_TEXT_LENGTH = 5000
 
 
 # ---------------------------------------------------------------------------
@@ -85,6 +101,16 @@ def _row(row) -> dict:
     return dict(row) if row else {}
 
 
+def _remove_files(paths: list[str]) -> None:
+    """Löscht Upload-Dateien von Disk; Fehler dabei sind nicht fatal."""
+    for p in paths:
+        if p and os.path.exists(p):
+            try:
+                os.remove(p)
+            except OSError:
+                pass
+
+
 def _rows(rows) -> list[dict]:
     """Konvertiert eine Liste von sqlite3.Row-Objekten in eine Liste von Dicts."""
     return [dict(r) for r in rows]
@@ -107,6 +133,164 @@ def _int_arg(name: str, value: str) -> tuple[int | None, object]:
         return None, _err(f"Ungültiger Wert für '{name}'.")
 
 
+def _num_field(data: dict, key: str, *, default=None, minimum=None,
+               required=False, greater_than=None):
+    """
+    Liest ein Zahlenfeld aus einem JSON-Body mit Validierung.
+
+    Lehnt Booleans (True wäre sonst 1.0) und nicht-endliche Werte ab:
+    Infinity/NaN würden bis in die Aggregationen durchschlagen und dort
+    das gesamte Dashboard-JSON ungültig machen.
+
+    Gibt (wert, None) bei Erfolg oder (None, fehlerantwort) bei Fehler zurück.
+    """
+    if key not in data or data[key] is None:
+        if required:
+            return None, _err(f"Feld '{key}' ist Pflichtfeld (Zahl).")
+        return default, None
+    if isinstance(data[key], bool):
+        return None, _err(f"'{key}' muss eine Zahl sein.")
+    try:
+        val = float(data[key])
+    except (ValueError, TypeError):
+        return None, _err(f"'{key}' muss eine Zahl sein.")
+    if not math.isfinite(val):
+        return None, _err(f"'{key}' muss eine endliche Zahl sein.")
+    if minimum is not None and val < minimum:
+        return None, _err(f"'{key}' muss >= {minimum} sein.")
+    if greater_than is not None and val <= greater_than:
+        return None, _err(f"'{key}' muss > {greater_than} sein.")
+    return val, None
+
+
+def _str_field(data: dict, key: str, *, required=False, default=None,
+               max_length=MAX_TEXT_LENGTH):
+    """
+    Liest ein Textfeld aus einem JSON-Body mit Typ- und Längenprüfung.
+
+    Ohne diese Prüfung führen Nicht-Strings ({"name": 123}) zu einem
+    Absturz in .strip() bzw. in SQLite statt zu einer klaren 400-Antwort.
+
+    Gibt (wert, None) bei Erfolg oder (None, fehlerantwort) bei Fehler zurück.
+    Ein leerer Wert wird zu None normalisiert, sofern nicht required.
+    """
+    if key not in data or data[key] is None:
+        if required:
+            return None, _err(f"Feld '{key}' ist Pflichtfeld.")
+        return default, None
+    val = data[key]
+    if not isinstance(val, str):
+        return None, _err(f"'{key}' muss Text sein.")
+    val = val.strip()
+    if not val:
+        if required:
+            return None, _err(f"'{key}' darf nicht leer sein.")
+        return None, None
+    if len(val) > max_length:
+        return None, _err(f"'{key}' ist zu lang (max. {max_length} Zeichen).")
+    return val, None
+
+
+def _flag_field(data: dict, key: str, *, default=1):
+    """
+    Liest ein 0/1-Flag (billed) und gibt es normalisiert zurück.
+
+    Akzeptiert 0/1, "0"/"1" und true/false (bequem für den MCP-Agenten).
+    Wichtig: der normalisierte Wert muss auch gespeichert werden — ein
+    ungeprüft durchgereichtes 1.5 ließ die Position aus allen Summen
+    herausfallen (weder billed=1 noch billed=0).
+
+    Gibt (0|1, None) bei Erfolg oder (None, fehlerantwort) bei Fehler zurück.
+    """
+    if key not in data:
+        return default, None
+    val = data[key]
+    if isinstance(val, bool):
+        return (1 if val else 0), None
+    if isinstance(val, int) and val in (0, 1):
+        return val, None
+    if isinstance(val, str):
+        s = val.strip().lower()
+        if s in ("0", "false", "nein"):
+            return 0, None
+        if s in ("1", "true", "ja"):
+            return 1, None
+    return None, _err(f"'{key}' muss 0 oder 1 sein.")
+
+
+def _date_field(data: dict, key: str):
+    """
+    Liest ein Datumsfeld (YYYY-MM-DD) mit Formatprüfung.
+
+    Leerstring wird zu None normalisiert, damit POST und PUT dasselbe
+    Ergebnis liefern. Gibt (wert|None, None) oder (None, fehlerantwort) zurück.
+    """
+    if key not in data or data[key] is None:
+        return None, None
+    val = data[key]
+    if not isinstance(val, str):
+        return None, _err(f"'{key}' muss ein Datum als Text sein (YYYY-MM-DD).")
+    val = val.strip()
+    if not val:
+        return None, None
+    try:
+        date.fromisoformat(val)
+    except ValueError:
+        return None, _err(f"'{key}' muss das Format YYYY-MM-DD haben.")
+    return val, None
+
+
+def _trade_or_error(trade_id, site_id: int):
+    """
+    Prüft eine trade_id auf Typ, Existenz und Zugehörigkeit zur Baustelle.
+
+    Gibt (int|None, None) bei Erfolg oder (None, fehlerantwort) zurück.
+    None als trade_id ist erlaubt (Aufgabe ohne Gewerk).
+    """
+    if trade_id is None:
+        return None, None
+    try:
+        trade_id = int(trade_id)
+    except (ValueError, TypeError):
+        return None, _err("'trade_id' muss eine Ganzzahl sein.")
+    trade = db.get_trade(trade_id)
+    if not trade:
+        return None, _err("Gewerk nicht gefunden.", 404)
+    if trade["site_id"] != site_id:
+        return None, _err("Gewerk gehört zu einer anderen Baustelle.")
+    return trade_id, None
+
+
+# ---------------------------------------------------------------------------
+# Fehlerbehandlung: immer JSON, nie HTML
+# ---------------------------------------------------------------------------
+# Ohne diese Handler liefert Flask bei 404/405/413 und bei unerwarteten
+# Ausnahmen eine HTML-Seite. baulog_mcp.py kann die nicht parsen und meldet
+# dem Agenten nur "HTTP 500" ohne Ursache.
+
+@app.errorhandler(HTTPException)
+def _handle_http_exception(exc: HTTPException):
+    """Wandelt Flasks Standard-HTML-Fehlerseiten in JSON um."""
+    if exc.code == 413:
+        return _err("Datei ist zu groß (max. 20 MB).", 413)
+    return _err(exc.description or exc.name, exc.code or 500)
+
+
+@app.errorhandler(sqlite3.IntegrityError)
+def _handle_integrity_error(exc: sqlite3.IntegrityError):
+    """Verletzte Datenbank-Constraints sind Eingabefehler, keine Serverfehler."""
+    app.logger.warning("Constraint verletzt bei %s %s: %s",
+                       request.method, request.path, exc)
+    return _err(f"Datenbank-Regel verletzt: {exc}", 409)
+
+
+@app.errorhandler(Exception)
+def _handle_unexpected(exc: Exception):
+    """Letztes Netz: Stacktrace ins Log, generische JSON-Antwort nach außen."""
+    app.logger.exception("Unbehandelter Fehler bei %s %s", request.method, request.path)
+    return _err("Interner Serverfehler.", 500)
+
+
 # ---------------------------------------------------------------------------
 # Statische Route
 # ---------------------------------------------------------------------------
@@ -114,7 +298,7 @@ def _int_arg(name: str, value: str) -> tuple[int | None, object]:
 @app.route("/")
 def index():
     """Liefert index.html aus dem Projektverzeichnis."""
-    return send_from_directory(".", "index.html")
+    return send_from_directory(os.path.dirname(os.path.abspath(__file__)), "index.html")
 
 
 # ---------------------------------------------------------------------------
@@ -136,10 +320,13 @@ def api_projects_create():
     Pflichtfeld: name.
     """
     data = request.get_json(silent=True) or {}
-    name = (data.get("name") or "").strip()
-    if not name:
-        return _err("Feld 'name' ist Pflichtfeld.")
-    pid = db.create_project(name=name, note=data.get("note") or None)
+    name, err = _str_field(data, "name", required=True)
+    if err:
+        return err
+    note, err = _str_field(data, "note")
+    if err:
+        return err
+    pid = db.create_project(name=name, note=note)
     return _ok(id=pid), 201
 
 
@@ -166,15 +353,26 @@ def api_project_update(pid: int):
     fields = {k: data[k] for k in ("name", "note") if k in data}
     if not fields:
         return _err("Keine aktualisierbaren Felder angegeben.")
-    db.update_project(pid, **fields)
+    if "name" in fields:
+        fields["name"], err = _str_field(fields, "name", required=True)
+        if err:
+            return err
+    if "note" in fields:
+        fields["note"], err = _str_field(fields, "note")
+        if err:
+            return err
+    db.update_project(pid, fields)
     return _ok()
 
 
 @app.route("/api/projects/<int:pid>", methods=["DELETE"])
 def api_project_delete(pid: int):
-    """Löscht ein Projekt und kaskadiert zu Baustellen, Gewerken, Aufgaben usw."""
-    if not db.delete_project(pid):
+    """Löscht ein Projekt (Kaskade) und entfernt zugehörige Upload-Dateien."""
+    if not db.get_project(pid):
         return _err("Projekt nicht gefunden.", 404)
+    paths = db.document_paths_for_scope("project", pid)
+    db.delete_project(pid)
+    _remove_files(paths)
     return _ok()
 
 
@@ -208,9 +406,9 @@ def api_sites_create():
     Pflichtfelder: name, project_id.
     """
     data = request.get_json(silent=True) or {}
-    name = (data.get("name") or "").strip()
-    if not name:
-        return _err("Feld 'name' ist Pflichtfeld.")
+    name, err = _str_field(data, "name", required=True)
+    if err:
+        return err
     project_id = data.get("project_id")
     if project_id is None:
         return _err("Feld 'project_id' ist Pflichtfeld.")
@@ -220,12 +418,21 @@ def api_sites_create():
         return _err("'project_id' muss eine Ganzzahl sein.")
     if not db.get_project(project_id):
         return _err("Projekt nicht gefunden.", 404)
+    status = data.get("status") or "aktiv"
+    if status not in VALID_SITE_STATUS:
+        return _err(f"'status' muss eines von {', '.join(sorted(VALID_SITE_STATUS))} sein.")
+    address, err = _str_field(data, "address")
+    if err:
+        return err
+    note, err = _str_field(data, "note")
+    if err:
+        return err
     sid = db.create_site(
         project_id=project_id,
         name=name,
-        address=data.get("address") or None,
-        status=data.get("status") or "aktiv",
-        note=data.get("note") or None,
+        address=address,
+        status=status,
+        note=note,
     )
     return _ok(id=sid), 201
 
@@ -236,7 +443,7 @@ def api_site_get(sid: int):
     site = db.get_site(sid)
     if not site:
         return _err("Baustelle nicht gefunden.", 404)
-    trades = _rows(db.list_trades({"site_id": sid}))
+    trades = _rows(db.list_trades_with_stats(sid))
     return _ok(site=_row(site), trades=trades)
 
 
@@ -253,15 +460,36 @@ def api_site_update(sid: int):
     fields = {k: data[k] for k in ("name", "address", "status", "note", "project_id") if k in data}
     if not fields:
         return _err("Keine aktualisierbaren Felder angegeben.")
-    db.update_site(sid, **fields)
+    if "name" in fields:
+        fields["name"], err = _str_field(fields, "name", required=True)
+        if err:
+            return err
+    for optional_text in ("address", "note"):
+        if optional_text in fields:
+            fields[optional_text], err = _str_field(fields, optional_text)
+            if err:
+                return err
+    if "status" in fields and fields["status"] not in VALID_SITE_STATUS:
+        return _err(f"'status' muss eines von {', '.join(sorted(VALID_SITE_STATUS))} sein.")
+    if fields.get("project_id") is not None:
+        try:
+            fields["project_id"] = int(fields["project_id"])
+        except (ValueError, TypeError):
+            return _err("'project_id' muss eine Ganzzahl sein.")
+        if not db.get_project(fields["project_id"]):
+            return _err("Projekt nicht gefunden.", 404)
+    db.update_site(sid, fields)
     return _ok()
 
 
 @app.route("/api/sites/<int:sid>", methods=["DELETE"])
 def api_site_delete(sid: int):
-    """Löscht eine Baustelle und kaskadiert zu Gewerken, Aufgaben, Zeiten, Material, Dokumenten."""
-    if not db.delete_site(sid):
+    """Löscht eine Baustelle (Kaskade) und entfernt zugehörige Upload-Dateien."""
+    if not db.get_site(sid):
         return _err("Baustelle nicht gefunden.", 404)
+    paths = db.document_paths_for_scope("site", sid)
+    db.delete_site(sid)
+    _remove_files(paths)
     return _ok()
 
 
@@ -308,7 +536,9 @@ def api_trade_update(tid: int):
     fields = {k: data[k] for k in ("name",) if k in data}
     if not fields:
         return _err("Keine aktualisierbaren Felder angegeben.")
-    db.update_trade(tid, **fields)
+    if "name" in fields and not (fields["name"] or "").strip():
+        return _err("'name' darf nicht leer sein.")
+    db.update_trade(tid, fields)
     return _ok()
 
 
@@ -317,6 +547,92 @@ def api_trade_delete(tid: int):
     """Löscht ein Gewerk. Aufgaben mit diesem Gewerk behalten trade_id=NULL."""
     if not db.delete_trade(tid):
         return _err("Gewerk nicht gefunden.", 404)
+    return _ok()
+
+
+# ---------------------------------------------------------------------------
+# Personen (/api/persons)
+# ---------------------------------------------------------------------------
+
+@app.route("/api/persons", methods=["GET"])
+def api_persons_list():
+    """Gibt Personen inkl. Aggregaten zurück. Query: ?active=1 filtert auf aktive."""
+    active_only = request.args.get("active") == "1"
+    return _ok(persons=_rows(db.list_persons(active_only=active_only)))
+
+
+@app.route("/api/persons", methods=["POST"])
+def api_persons_create():
+    """
+    Legt eine Person an.
+
+    Body (JSON): { "name": "...", "hourly_rate": 20.0, "note": "..." }
+    Pflichtfeld: name (eindeutig). hourly_rate >= 0, Standard 0.
+    """
+    data = request.get_json(silent=True) or {}
+    name = data.get("name")
+    name = name.strip() if isinstance(name, str) else ""
+    if not name:
+        return _err("Feld 'name' ist Pflichtfeld.")
+    rate, err = _num_field(data, "hourly_rate", default=0.0, minimum=0.0)
+    if err:
+        return err
+    try:
+        pid = db.create_person(name=name, hourly_rate=rate, note=data.get("note") or None)
+    except sqlite3.IntegrityError:
+        return _err(f"Person '{name}' existiert bereits.", 409)
+    return _ok(id=pid), 201
+
+
+@app.route("/api/persons/<int:person_id>", methods=["PUT"])
+def api_person_update(person_id: int):
+    """
+    Aktualisiert Felder einer Person.
+
+    Body (JSON): beliebige Kombination aus { "name", "hourly_rate", "active", "note" }.
+    Umbenennen synchronisiert die Namen in bestehenden Zeiteinträgen.
+    """
+    if not db.get_person(person_id):
+        return _err("Person nicht gefunden.", 404)
+    data = request.get_json(silent=True) or {}
+    fields = {k: data[k] for k in ("name", "hourly_rate", "active", "note") if k in data}
+    if not fields:
+        return _err("Keine aktualisierbaren Felder angegeben.")
+    if "name" in fields:
+        name_val = fields["name"]
+        name_val = name_val.strip() if isinstance(name_val, str) else ""
+        if not name_val:
+            return _err("'name' darf nicht leer sein.")
+        fields["name"] = name_val
+    if "hourly_rate" in fields:
+        rate, err = _num_field(fields, "hourly_rate", minimum=0.0, required=True)
+        if err:
+            return err
+        fields["hourly_rate"] = rate
+    if "active" in fields:
+        try:
+            active_val = int(fields["active"])
+            if active_val not in (0, 1):
+                return _err("'active' muss 0 oder 1 sein.")
+            fields["active"] = active_val
+        except (ValueError, TypeError):
+            return _err("'active' muss 0 oder 1 sein.")
+    try:
+        db.update_person(person_id, fields)
+    except sqlite3.IntegrityError:
+        return _err(f"Person '{fields.get('name')}' existiert bereits.", 409)
+    return _ok()
+
+
+@app.route("/api/persons/<int:person_id>", methods=["DELETE"])
+def api_person_delete(person_id: int):
+    """Löscht eine Person ohne Zeiteinträge; mit Zeiteinträgen → 409 (deaktivieren)."""
+    if not db.get_person(person_id):
+        return _err("Person nicht gefunden.", 404)
+    try:
+        db.delete_person(person_id)
+    except db.PersonInUseError as exc:
+        return _err(str(exc), 409)
     return _ok()
 
 
@@ -357,21 +673,24 @@ def api_tasks_create(sid: int):
     if not db.get_site(sid):
         return _err("Baustelle nicht gefunden.", 404)
     data = request.get_json(silent=True) or {}
-    title = (data.get("title") or "").strip()
-    if not title:
-        return _err("Feld 'title' ist Pflichtfeld.")
-    trade_id = data.get("trade_id")
-    if trade_id is not None:
-        try:
-            trade_id = int(trade_id)
-        except (ValueError, TypeError):
-            return _err("'trade_id' muss eine Ganzzahl sein.")
+    title, err = _str_field(data, "title", required=True)
+    if err:
+        return err
+    trade_id, err = _trade_or_error(data.get("trade_id"), sid)
+    if err:
+        return err
+    status = data.get("status") or "offen"
+    if status not in VALID_TASK_STATUS:
+        return _err(f"'status' muss eines von {', '.join(sorted(VALID_TASK_STATUS))} sein.")
+    description, err = _str_field(data, "description")
+    if err:
+        return err
     task_id = db.create_task(
         site_id=sid,
         title=title,
         trade_id=trade_id,
-        status=data.get("status") or "offen",
-        description=data.get("description") or None,
+        status=status,
+        description=description,
     )
     return _ok(id=task_id), 201
 
@@ -416,21 +735,39 @@ def api_task_update(task_id: int):
 
     Body (JSON): beliebige Kombination aus { "title", "trade_id", "status", "description" }.
     """
-    if not db.get_task(task_id):
+    task = db.get_task(task_id)
+    if not task:
         return _err("Aufgabe nicht gefunden.", 404)
     data = request.get_json(silent=True) or {}
     fields = {k: data[k] for k in ("title", "trade_id", "status", "description") if k in data}
     if not fields:
         return _err("Keine aktualisierbaren Felder angegeben.")
-    db.update_task(task_id, **fields)
+    if "title" in fields:
+        fields["title"], err = _str_field(fields, "title", required=True)
+        if err:
+            return err
+    if "description" in fields:
+        fields["description"], err = _str_field(fields, "description")
+        if err:
+            return err
+    if fields.get("trade_id") is not None:
+        fields["trade_id"], err = _trade_or_error(fields["trade_id"], task["site_id"])
+        if err:
+            return err
+    if "status" in fields and fields["status"] not in VALID_TASK_STATUS:
+        return _err(f"'status' muss eines von {', '.join(sorted(VALID_TASK_STATUS))} sein.")
+    db.update_task(task_id, fields)
     return _ok()
 
 
 @app.route("/api/tasks/<int:task_id>", methods=["DELETE"])
 def api_task_delete(task_id: int):
-    """Löscht eine Aufgabe und kaskadiert zu Zeiteinträgen, Materialien und Dokumenten."""
-    if not db.delete_task(task_id):
+    """Löscht eine Aufgabe (Kaskade) und entfernt zugehörige Upload-Dateien."""
+    if not db.get_task(task_id):
         return _err("Aufgabe nicht gefunden.", 404)
+    paths = db.document_paths_for_scope("task", task_id)
+    db.delete_task(task_id)
+    _remove_files(paths)
     return _ok()
 
 
@@ -454,31 +791,67 @@ def api_timeentries_create(task_id: int):
     """
     Legt einen Zeiteintrag (Personalkosten) an.
 
-    Body (JSON): { "person", "hours", "hourly_rate", "billed"?, "work_date"? }
-    Pflichtfelder: person, hours, hourly_rate.
+    Body (JSON): { "person_id"?, "person"?, "hours", "hourly_rate"?, "billed"?, "work_date"? }
+    Entweder 'person_id' (Person muss existieren; setzt 'person'-Text und
+    Standard-Stundensatz) oder 'person' (Freitext, dann ist 'hourly_rate' Pflicht).
+    Pflichtfeld: hours (> 0).
     billed: 1 = mit Rechnung (Standard), 0 = ohne Rechnung.
     """
     if not db.get_task(task_id):
         return _err("Aufgabe nicht gefunden.", 404)
     data = request.get_json(silent=True) or {}
-    person = (data.get("person") or "").strip()
+
+    person_row = None
+    person_id = data.get("person_id")
+    if person_id is not None:
+        try:
+            person_id = int(person_id)
+        except (ValueError, TypeError):
+            return _err("'person_id' muss eine Ganzzahl sein.")
+        person_row = db.get_person(person_id)
+        if not person_row:
+            return _err("Person nicht gefunden.", 404)
+
+    if person_row:
+        person = person_row["name"]
+    else:
+        person, err = _str_field(data, "person")
+        if err:
+            return err
     if not person:
-        return _err("Feld 'person' ist Pflichtfeld.")
-    try:
-        hours = float(data["hours"])
-        hourly_rate = float(data["hourly_rate"])
-    except (KeyError, ValueError, TypeError):
-        return _err("Felder 'hours' und 'hourly_rate' sind Pflichtfelder (Zahlen).")
-    billed = int(data.get("billed", 1))
-    if billed not in (0, 1):
-        return _err("'billed' muss 0 oder 1 sein.")
+        return _err("Entweder 'person_id' oder 'person' muss angegeben werden.")
+
+    hours, err = _num_field(data, "hours", required=True, greater_than=0)
+    if err:
+        return err
+    default_rate = person_row["hourly_rate"] if person_row else None
+    rate, err = _num_field(data, "hourly_rate", default=default_rate, minimum=0)
+    if err:
+        return err
+    if rate is None:
+        return _err("Feld 'hourly_rate' ist Pflichtfeld (Zahl).")
+    # Ein aus den Stammdaten geerbter Satz von 0 ist fast immer ein Versehen
+    # (Person ohne gepflegten Satz) und würde still 0 € Kosten buchen.
+    # Bewusste Eigenleistung bleibt möglich: hourly_rate explizit auf 0 setzen.
+    if rate == 0 and "hourly_rate" not in data:
+        return _err(
+            f"Person '{person}' hat keinen Stundensatz hinterlegt. "
+            f"Bitte den Stundensatz der Person pflegen oder 'hourly_rate' "
+            f"explizit angeben (0 für unbezahlte Eigenleistung)."
+        )
+    billed, err = _flag_field(data, "billed")
+    if err:
+        return err
+    paid, err = _flag_field(data, "paid", default=0)
+    if err:
+        return err
+    work_date, err = _date_field(data, "work_date")
+    if err:
+        return err
     eid = db.create_time_entry(
-        task_id=task_id,
-        person=person,
-        hours=hours,
-        hourly_rate=hourly_rate,
-        billed=billed,
-        work_date=data.get("work_date") or None,
+        task_id=task_id, person=person, person_id=person_id,
+        hours=hours, hourly_rate=rate, billed=billed, paid=paid,
+        work_date=work_date,
     )
     return _ok(id=eid), 201
 
@@ -488,17 +861,53 @@ def api_timeentry_update(eid: int):
     """
     Aktualisiert Felder eines Zeiteintrags.
 
-    Body (JSON): beliebige Kombination aus { "person", "hours", "hourly_rate", "billed", "work_date" }.
+    Body (JSON): beliebige Kombination aus
+    { "person", "person_id", "hours", "hourly_rate", "billed", "work_date" }.
+    Gesetzte 'person_id' synchronisiert den 'person'-Text; 'person_id': null löst
+    die Verknüpfung (Text bleibt erhalten).
     """
     if not db.get_time_entry(eid):
         return _err("Zeiteintrag nicht gefunden.", 404)
     data = request.get_json(silent=True) or {}
-    fields = {k: data[k] for k in ("person", "hours", "hourly_rate", "billed", "work_date") if k in data}
+    fields = {k: data[k] for k in
+              ("person", "person_id", "hours", "hourly_rate", "billed", "paid", "work_date")
+              if k in data}
     if not fields:
         return _err("Keine aktualisierbaren Felder angegeben.")
-    if "billed" in fields and int(fields["billed"]) not in (0, 1):
-        return _err("'billed' muss 0 oder 1 sein.")
-    db.update_time_entry(eid, **fields)
+    if fields.get("person_id") is not None:
+        try:
+            fields["person_id"] = int(fields["person_id"])
+        except (ValueError, TypeError):
+            return _err("'person_id' muss eine Ganzzahl sein.")
+        person_row = db.get_person(fields["person_id"])
+        if not person_row:
+            return _err("Person nicht gefunden.", 404)
+        fields["person"] = person_row["name"]
+    elif "person" in fields:
+        fields["person"], err = _str_field(fields, "person", required=True)
+        if err:
+            return err
+    if "hours" in fields:
+        fields["hours"], err = _num_field(fields, "hours", required=True, greater_than=0)
+        if err:
+            return err
+    if "hourly_rate" in fields:
+        fields["hourly_rate"], err = _num_field(fields, "hourly_rate", required=True, minimum=0)
+        if err:
+            return err
+    if "billed" in fields:
+        fields["billed"], err = _flag_field(fields, "billed")
+        if err:
+            return err
+    if "paid" in fields:
+        fields["paid"], err = _flag_field(fields, "paid", default=0)
+        if err:
+            return err
+    if "work_date" in fields:
+        fields["work_date"], err = _date_field(fields, "work_date")
+        if err:
+            return err
+    db.update_time_entry(eid, fields)
     return _ok()
 
 
@@ -537,24 +946,32 @@ def api_materials_create(task_id: int):
     if not db.get_task(task_id):
         return _err("Aufgabe nicht gefunden.", 404)
     data = request.get_json(silent=True) or {}
-    name = (data.get("name") or "").strip()
-    if not name:
-        return _err("Feld 'name' ist Pflichtfeld.")
-    try:
-        qty = float(data["qty"])
-        unit_price = float(data["unit_price"])
-    except (KeyError, ValueError, TypeError):
-        return _err("Felder 'qty' und 'unit_price' sind Pflichtfelder (Zahlen).")
-    billed = int(data.get("billed", 1))
-    if billed not in (0, 1):
-        return _err("'billed' muss 0 oder 1 sein.")
+    name, err = _str_field(data, "name", required=True)
+    if err:
+        return err
+    qty, err = _num_field(data, "qty", required=True, minimum=0)
+    if err:
+        return err
+    unit_price, err = _num_field(data, "unit_price", required=True, minimum=0)
+    if err:
+        return err
+    billed, err = _flag_field(data, "billed")
+    if err:
+        return err
+    paid, err = _flag_field(data, "paid", default=0)
+    if err:
+        return err
+    unit, err = _str_field(data, "unit")
+    if err:
+        return err
     mid = db.create_material(
         task_id=task_id,
         name=name,
         qty=qty,
         unit_price=unit_price,
-        unit=data.get("unit") or None,
+        unit=unit,
         billed=billed,
+        paid=paid,
     )
     return _ok(id=mid), 201
 
@@ -569,20 +986,45 @@ def api_material_update(mid: int):
     if not db.get_material(mid):
         return _err("Materialposition nicht gefunden.", 404)
     data = request.get_json(silent=True) or {}
-    fields = {k: data[k] for k in ("name", "qty", "unit", "unit_price", "billed") if k in data}
+    fields = {k: data[k] for k in ("name", "qty", "unit", "unit_price", "billed", "paid") if k in data}
     if not fields:
         return _err("Keine aktualisierbaren Felder angegeben.")
-    if "billed" in fields and int(fields["billed"]) not in (0, 1):
-        return _err("'billed' muss 0 oder 1 sein.")
-    db.update_material(mid, **fields)
+    if "billed" in fields:
+        fields["billed"], err = _flag_field(fields, "billed")
+        if err:
+            return err
+    if "paid" in fields:
+        fields["paid"], err = _flag_field(fields, "paid", default=0)
+        if err:
+            return err
+    if "name" in fields:
+        fields["name"], err = _str_field(fields, "name", required=True)
+        if err:
+            return err
+    if "unit" in fields:
+        fields["unit"], err = _str_field(fields, "unit")
+        if err:
+            return err
+    if "qty" in fields:
+        fields["qty"], err = _num_field(fields, "qty", required=True, minimum=0)
+        if err:
+            return err
+    if "unit_price" in fields:
+        fields["unit_price"], err = _num_field(fields, "unit_price", required=True, minimum=0)
+        if err:
+            return err
+    db.update_material(mid, fields)
     return _ok()
 
 
 @app.route("/api/materials/<int:mid>", methods=["DELETE"])
 def api_material_delete(mid: int):
-    """Löscht eine Materialposition (kaskadiert zu verknüpften Dokumenten)."""
-    if not db.delete_material(mid):
+    """Löscht eine Materialposition (kaskadiert zu verknüpften Dokumenten) und entfernt zugehörige Upload-Dateien."""
+    if not db.get_material(mid):
         return _err("Materialposition nicht gefunden.", 404)
+    paths = db.document_paths_for_scope("material", mid)
+    db.delete_material(mid)
+    _remove_files(paths)
     return _ok()
 
 
@@ -675,7 +1117,7 @@ def api_documents_upload():
         db.delete_document(doc_id)
         return _err(f"Datei konnte nicht gespeichert werden: {exc}", 500)
 
-    db.update_document(doc_id, stored_path=stored_path)
+    db.update_document(doc_id, {"stored_path": stored_path})
 
     return _ok(id=doc_id, filename=filename, stored_name=stored_name), 201
 
@@ -835,7 +1277,7 @@ def api_document_paperless(doc_id: int):
         return _err("Paperless hat keine Dokument-ID zurückgegeben.", 502)
 
     pl_url = f"{paperless_url}/documents/{pl_doc_id}"
-    db.update_document(doc_id, paperless_id=int(pl_doc_id), paperless_url=pl_url)
+    db.update_document(doc_id, {"paperless_id": int(pl_doc_id), "paperless_url": pl_url})
     return _ok(paperless_id=pl_doc_id, paperless_url=pl_url)
 
 
@@ -870,6 +1312,29 @@ def api_project_summary(pid: int):
 def api_gesamt_summary():
     """Gibt Kosten-Summen über alle Projekte und Baustellen zurück."""
     return _ok(summary=db.gesamt_summary())
+
+
+@app.route("/api/dashboard", methods=["GET"])
+def api_dashboard():
+    """
+    Liefert alle Dashboard-Daten in einem Aufruf.
+
+    Query-Parameter: ?project=<pid> und/oder ?site=<sid> (beide optional).
+    """
+    project_id = site_id = None
+    if request.args.get("project"):
+        project_id, err = _int_arg("project", request.args["project"])
+        if err:
+            return err
+        if not db.get_project(project_id):
+            return _err("Projekt nicht gefunden.", 404)
+    if request.args.get("site"):
+        site_id, err = _int_arg("site", request.args["site"])
+        if err:
+            return err
+        if not db.get_site(site_id):
+            return _err("Baustelle nicht gefunden.", 404)
+    return _ok(dashboard=db.dashboard_data(project_id=project_id, site_id=site_id))
 
 
 # ---------------------------------------------------------------------------

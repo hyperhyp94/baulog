@@ -4,7 +4,13 @@ baulog_mcp.py — MCP-Server für baulog.
 Dünner HTTP-Client auf die REST-API von server.py (Port 5112).
 Wird nach ~/hermes-tools/mcp/ kopiert; mcp_helper.py liegt dort im selben Verzeichnis.
 
-Alle 34 Tools gemäß PLAN.md Abschnitt 9.
+Alle Tools gemäß PLAN.md Abschnitt 9 (Stand: 39 registrierte Tools).
+
+Rückgabe-Konvention:
+  * Erfolg:  {"status": "ok", ...}
+  * Fehler:  {"success": False, "error": "<Klartext>"}
+Ein Aufruf gilt genau dann als fehlgeschlagen, wenn "success" vorhanden
+und False ist.
 """
 
 import sys
@@ -116,6 +122,35 @@ def _multipart(fields: dict, file_path: str) -> tuple[str, bytes]:
     ).encode("utf-8") + data + b"\r\n"
     body += f"--{boundary}--\r\n".encode("utf-8")
     return boundary, body
+
+
+# ---------------------------------------------------------------------------
+# Personen-Auflösung
+# ---------------------------------------------------------------------------
+
+def _resolve_person(name: str) -> tuple[dict | None, dict | None]:
+    """
+    Löst einen Personennamen gegen die Personen-Stammdaten auf.
+
+    Erst exakter Match, dann case-insensitiv (nur wenn eindeutig).
+    Rückgabe: (person_dict, None) bei Erfolg, (None, fehler_dict) bei Fehler.
+    """
+    res = _get("/api/persons")
+    if res.get("success") is False:
+        return None, res
+    persons = res.get("persons", [])
+    exact = [p for p in persons if p["name"] == name]
+    if len(exact) == 1:
+        return exact[0], None
+    ci = [p for p in persons if p["name"].lower() == name.lower()]
+    if len(ci) == 1:
+        return ci[0], None
+    known = ", ".join(sorted(p["name"] for p in persons)) or "keine"
+    return None, {
+        "success": False,
+        "error": (f"Person '{name}' nicht gefunden. Bekannte Personen: {known}. "
+                  f"Neue Personen zuerst mit person_anlegen anlegen."),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -495,36 +530,34 @@ def aufgabe_loeschen(aufgabe_id: int) -> dict:
 # 5. Zeiterfassung (Personalkosten)
 # ---------------------------------------------------------------------------
 
-def zeiteintrag_anlegen(
-    aufgabe_id: int,
-    person: str,
-    stunden: float,
-    stundensatz: float,
-    mit_rechnung: bool = True,
-    datum: str = "",
-) -> dict:
+def zeiteintrag_anlegen(aufgabe_id: int, person: str, stunden: float,
+                        stundensatz: float = None, mit_rechnung: bool = True,
+                        datum: str = "", bezahlt: bool = False) -> dict:
     """
-    Erfasst einen Zeiteintrag (Personalkosten) zu einer Aufgabe.
+    Erfasst Arbeitszeit (Personalkosten) auf einer Aufgabe. Kosten = Stunden × Satz.
 
-    Die Kosten werden serverseitig berechnet: Kosten = Stunden × Stundensatz.
-
-    Parameter:
-        aufgabe_id   — Pflichtfeld: ID der zugehörigen Aufgabe (int).
-        person       — Pflichtfeld: Name der Person / des Handwerkers (str).
-        stunden      — Pflichtfeld: Anzahl geleisteter Stunden (float, z. B. 7.5).
-        stundensatz  — Pflichtfeld: Stundensatz in Euro (float, z. B. 45.0).
-        mit_rechnung — True = mit Rechnung (dokumentiert/versteuerbar, Standard),
-                       False = ohne Rechnung.
-        datum        — Leistungsdatum im ISO-Format YYYY-MM-DD (optional, z. B. „2025-03-15").
-
-    Rückgabe: {"status": "ok", "id": <neue Zeiteintrag-ID>}
+    :param aufgabe_id: ID der Aufgabe (aus aufgaben_liste).
+    :param person: Name der Person — muss in den Personen-Stammdaten existieren
+                   (siehe personen_liste; neue Personen mit person_anlegen anlegen).
+    :param stunden: Stundenaufwand (> 0), z. B. 7.5.
+    :param stundensatz: Stundensatz in Euro/Stunde; wenn weggelassen, gilt der
+                        Standard-Satz der Person. Hat die Person keinen Satz
+                        hinterlegt (0), wird der Aufruf mit einem Fehler
+                        abgelehnt — dann entweder den Satz der Person pflegen
+                        (person_bearbeiten) oder hier explizit angeben
+                        (0 nur für bewusst unbezahlte Eigenleistung).
+    :param mit_rechnung: True = mit Rechnung (dokumentiert), False = ohne Rechnung.
+    :param datum: Tag der Leistung als YYYY-MM-DD, optional.
+    :param bezahlt: True = bereits bezahlt, False = noch offen (Standard).
     """
-    payload: dict = {
-        "person": person,
-        "hours": stunden,
-        "hourly_rate": stundensatz,
-        "billed": 1 if mit_rechnung else 0,
-    }
+    p, err = _resolve_person(person)
+    if err:
+        return err
+    payload = {"person_id": p["id"], "hours": stunden,
+               "billed": 1 if mit_rechnung else 0,
+               "paid": 1 if bezahlt else 0}
+    if stundensatz is not None:
+        payload["hourly_rate"] = stundensatz
     if datum:
         payload["work_date"] = datum
     return _post(f"/api/tasks/{aufgabe_id}/timeentries", payload)
@@ -543,38 +576,37 @@ def zeiteintraege_liste(aufgabe_id: int) -> dict:
     return _get(f"/api/tasks/{aufgabe_id}/timeentries")
 
 
-def zeiteintrag_bearbeiten(
-    zeiteintrag_id: int,
-    person: str | None = None,
-    stunden: float | None = None,
-    stundensatz: float | None = None,
-    mit_rechnung: bool | None = None,
-    datum: str | None = None,
-) -> dict:
+def zeiteintrag_bearbeiten(zeiteintrag_id: int, person: str = None,
+                           stunden: float = None, stundensatz: float = None,
+                           mit_rechnung: bool = None, datum: str = None,
+                           bezahlt: bool = None) -> dict:
     """
-    Ändert Felder eines bestehenden Zeiteintrags.
+    Ändert nur die angegebenen Felder eines Zeiteintrags.
 
-    Parameter:
-        zeiteintrag_id — ID des zu ändernden Zeiteintrags (int).
-        person         — Neuer Name der Person (optional).
-        stunden        — Neue Stundenzahl (float, optional).
-        stundensatz    — Neuer Stundensatz in Euro (float, optional).
-        mit_rechnung   — True = mit Rechnung, False = ohne Rechnung (optional).
-        datum          — Neues Leistungsdatum YYYY-MM-DD (optional).
-
-    Rückgabe: {"status": "ok"}
+    :param zeiteintrag_id: ID des Zeiteintrags (aus zeiteintraege_liste).
+    :param person: Neuer Personenname — muss in den Stammdaten existieren.
+    :param stunden: Neuer Stundenaufwand (> 0).
+    :param stundensatz: Neuer Stundensatz in Euro/Stunde (>= 0).
+    :param mit_rechnung: True = mit Rechnung, False = ohne Rechnung.
+    :param datum: Tag der Leistung als YYYY-MM-DD.
+    :param bezahlt: True = bezahlt, False = offen (optional).
     """
-    payload: dict = {}
+    payload = {}
     if person is not None:
-        payload["person"] = person
+        p, err = _resolve_person(person)
+        if err:
+            return err
+        payload["person_id"] = p["id"]
     if stunden is not None:
         payload["hours"] = stunden
     if stundensatz is not None:
         payload["hourly_rate"] = stundensatz
     if mit_rechnung is not None:
         payload["billed"] = 1 if mit_rechnung else 0
+    if bezahlt is not None:
+        payload["paid"] = 1 if bezahlt else 0
     if datum is not None:
-        payload["work_date"] = datum
+        payload["work_date"] = datum or None
     return _put(f"/api/timeentries/{zeiteintrag_id}", payload)
 
 
@@ -591,6 +623,66 @@ def zeiteintrag_loeschen(zeiteintrag_id: int) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# 5.5. Personen (Stammdaten)
+# ---------------------------------------------------------------------------
+
+def person_anlegen(name: str, stundensatz: float = 0.0, note: str = "") -> dict:
+    """
+    Legt eine Person (Stammdaten) an.
+
+    :param name: Eindeutiger Name der Person (Pflicht), z. B. "Robert".
+    :param stundensatz: Standard-Stundensatz in Euro/Stunde (>= 0, Standard 0).
+    :param note: Optionale Notiz.
+    """
+    return _post("/api/persons", {"name": name, "hourly_rate": stundensatz,
+                                  "note": note or None})
+
+
+def personen_liste(nur_aktive: bool = True) -> dict:
+    """
+    Listet Personen inkl. Summen (Stunden, Kosten, Anzahl Zeiteinträge).
+
+    :param nur_aktive: True = nur aktive Personen (Standard), False = alle.
+    """
+    return _get("/api/persons?active=1" if nur_aktive else "/api/persons")
+
+
+def person_bearbeiten(person_id: int, name: str = None, stundensatz: float = None,
+                      aktiv: bool = None, note: str = None) -> dict:
+    """
+    Ändert nur die angegebenen Felder einer Person.
+
+    :param person_id: ID der Person (aus personen_liste).
+    :param name: Neuer Name; Umbenennen aktualisiert auch bestehende Zeiteinträge.
+    :param stundensatz: Neuer Standard-Stundensatz in Euro/Stunde (>= 0).
+    :param aktiv: False deaktiviert die Person (erscheint nicht mehr in Auswahl),
+                  True reaktiviert sie.
+    :param note: Neue Notiz.
+    """
+    payload = {}
+    if name is not None:
+        payload["name"] = name
+    if stundensatz is not None:
+        payload["hourly_rate"] = stundensatz
+    if aktiv is not None:
+        payload["active"] = 1 if aktiv else 0
+    if note is not None:
+        payload["note"] = note
+    return _put(f"/api/persons/{person_id}", payload)
+
+
+def person_loeschen(person_id: int) -> dict:
+    """
+    Löscht eine Person ohne Zeiteinträge. Mit Zeiteinträgen liefert die API einen
+    Fehler mit dem Hinweis, die Person stattdessen zu deaktivieren
+    (person_bearbeiten mit aktiv=False).
+
+    :param person_id: ID der Person.
+    """
+    return _delete(f"/api/persons/{person_id}")
+
+
+# ---------------------------------------------------------------------------
 # 6. Material
 # ---------------------------------------------------------------------------
 
@@ -601,6 +693,7 @@ def material_anlegen(
     einzelpreis: float,
     einheit: str = "Stk",
     mit_rechnung: bool = True,
+    bezahlt: bool = False,
 ) -> dict:
     """
     Legt eine Materialposition zu einer Aufgabe an.
@@ -624,6 +717,7 @@ def material_anlegen(
         "unit_price": einzelpreis,
         "unit": einheit,
         "billed": 1 if mit_rechnung else 0,
+        "paid": 1 if bezahlt else 0,
     }
     return _post(f"/api/tasks/{aufgabe_id}/materials", payload)
 
@@ -648,6 +742,7 @@ def material_bearbeiten(
     einheit: str | None = None,
     einzelpreis: float | None = None,
     mit_rechnung: bool | None = None,
+    bezahlt: bool | None = None,
 ) -> dict:
     """
     Ändert Felder einer bestehenden Materialposition.
@@ -673,6 +768,8 @@ def material_bearbeiten(
         payload["unit_price"] = einzelpreis
     if mit_rechnung is not None:
         payload["billed"] = 1 if mit_rechnung else 0
+    if bezahlt is not None:
+        payload["paid"] = 1 if bezahlt else 0
     return _put(f"/api/materials/{material_id}", payload)
 
 
@@ -703,10 +800,13 @@ def baustelle_summary(baustelle_id: int) -> dict:
         baustelle_id — ID der Baustelle (int).
 
     Rückgabe: {"status": "ok", "summary": {
-        "material_mit_rechnung": ..., "material_ohne_rechnung": ...,
-        "personal_mit_rechnung": ..., "personal_ohne_rechnung": ...,
-        "gesamt": ..., "je_gewerk": [...]
+        "mat_mit": ..., "mat_ohne": ..., "mat_gesamt": ...,
+        "pers_mit": ..., "pers_ohne": ..., "pers_gesamt": ...,
+        "gesamt_mit": ..., "gesamt_ohne": ..., "gesamt": ...,
+        "by_trade": [{"trade_id", "trade_name", "mat_mit", "mat_ohne",
+                      "pers_mit", "pers_ohne", "gesamt", ...}]
     }}
+    Alle Beträge in Euro. „mit"/„ohne" bezieht sich auf das Rechnungs-Flag.
     """
     return _get(f"/api/sites/{baustelle_id}/summary")
 
@@ -716,15 +816,19 @@ def projekt_summary(projekt_id: int) -> dict:
     Gibt Kosten-Summen für ein Projekt zurück, aggregiert über alle Baustellen.
 
     Enthält Material- und Personalkosten, aufgeschlüsselt nach
-    „mit Rechnung" / „ohne Rechnung", sowie Aufschlüsselung je Baustelle.
+    „mit Rechnung" / „ohne Rechnung", sowie eine Aufschlüsselung je Gewerk.
+
+    Für eine Aufschlüsselung je BAUSTELLE stattdessen dashboard_summary
+    (Feld „by_site") verwenden — dieses Tool liefert sie nicht.
 
     Parameter:
         projekt_id — ID des Projekts (int).
 
     Rückgabe: {"status": "ok", "summary": {
-        "material_mit_rechnung": ..., "material_ohne_rechnung": ...,
-        "personal_mit_rechnung": ..., "personal_ohne_rechnung": ...,
-        "gesamt": ..., "je_baustelle": [...]
+        "mat_mit": ..., "mat_ohne": ..., "mat_gesamt": ...,
+        "pers_mit": ..., "pers_ohne": ..., "pers_gesamt": ...,
+        "gesamt_mit": ..., "gesamt_ohne": ..., "gesamt": ...,
+        "by_trade": [...]
     }}
     """
     return _get(f"/api/projects/{projekt_id}/summary")
@@ -737,12 +841,29 @@ def gesamt_summary() -> dict:
     Keine Parameter.
 
     Rückgabe: {"status": "ok", "summary": {
-        "material_mit_rechnung": ..., "material_ohne_rechnung": ...,
-        "personal_mit_rechnung": ..., "personal_ohne_rechnung": ...,
-        "gesamt": ...
+        "mat_mit": ..., "mat_ohne": ..., "mat_gesamt": ...,
+        "pers_mit": ..., "pers_ohne": ..., "pers_gesamt": ...,
+        "gesamt_mit": ..., "gesamt_ohne": ..., "gesamt": ...,
+        "by_trade": [...]
     }}
     """
     return _get("/api/summary")
+
+
+def dashboard_summary(projekt_id: int = None, baustelle_id: int = None) -> dict:
+    """
+    Liefert den kompletten Dashboard-Datensatz: KPIs (Kosten mit/ohne Rechnung,
+    offene Aufgaben, aktive Baustellen), Aufschlüsselung je Gewerk (by_trade),
+    je Baustelle (by_site), je Person (by_person) und die letzten 10 Erfassungen.
+
+    :param projekt_id: Optional auf ein Projekt einschränken.
+    :param baustelle_id: Optional auf eine Baustelle einschränken.
+    """
+    if baustelle_id is not None:
+        return _get(f"/api/dashboard?site={baustelle_id}")
+    if projekt_id is not None:
+        return _get(f"/api/dashboard?project={projekt_id}")
+    return _get("/api/dashboard")
 
 
 # ---------------------------------------------------------------------------
@@ -906,6 +1027,12 @@ register_tool("zeiteintraege_liste",  zeiteintraege_liste)
 register_tool("zeiteintrag_bearbeiten", zeiteintrag_bearbeiten)
 register_tool("zeiteintrag_loeschen", zeiteintrag_loeschen)
 
+# Personen
+register_tool("person_anlegen",       person_anlegen)
+register_tool("personen_liste",       personen_liste)
+register_tool("person_bearbeiten",    person_bearbeiten)
+register_tool("person_loeschen",      person_loeschen)
+
 # Material
 register_tool("material_anlegen",     material_anlegen)
 register_tool("materialien_liste",    materialien_liste)
@@ -916,6 +1043,7 @@ register_tool("material_loeschen",    material_loeschen)
 register_tool("baustelle_summary",    baustelle_summary)
 register_tool("projekt_summary",      projekt_summary)
 register_tool("gesamt_summary",       gesamt_summary)
+register_tool("dashboard_summary",    dashboard_summary)
 
 # Dokumente & Fotos
 register_tool("dokument_hochladen",   dokument_hochladen)
