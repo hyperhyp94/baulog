@@ -4,13 +4,19 @@ baulog_mcp.py — MCP-Server für baulog.
 Dünner HTTP-Client auf die REST-API von server.py (Port 5112).
 Wird nach ~/hermes-tools/mcp/ kopiert; mcp_helper.py liegt dort im selben Verzeichnis.
 
-Alle Tools gemäß PLAN.md Abschnitt 9 (Stand: 39 registrierte Tools).
+Alle Tools gemäß PLAN.md Abschnitt 9 (Stand: 41 registrierte Tools).
 
 Rückgabe-Konvention:
   * Erfolg:  {"status": "ok", ...}
   * Fehler:  {"success": False, "error": "<Klartext>"}
 Ein Aufruf gilt genau dann als fehlgeschlagen, wenn "success" vorhanden
 und False ist.
+
+Typ-Annotationen: mcp_helper erkennt nur einfache Typen (int, float, bool).
+Optionale Parameter deshalb als `int = None` statt `int | None = None`
+schreiben — sonst meldet das Schema „string“ und das Modell schickt Text
+(„false“ wäre dann wahr). Ja/Nein- und Datumswerte zusätzlich mit _ja_nein /
+_datum auswerten, weil Modelle trotzdem gelegentlich Text schicken.
 """
 
 import sys
@@ -22,10 +28,12 @@ from mcp_helper import register_tool, run_server  # noqa: E402 — erst nach sys
 
 import json
 import mimetypes
+import re
 import uuid
 import urllib.request
 import urllib.error
 import urllib.parse
+from datetime import date, timedelta
 
 # ---------------------------------------------------------------------------
 # Konfiguration
@@ -40,17 +48,24 @@ BASE_URL = os.environ.get("BAULOG_URL", "http://127.0.0.1:5112")
 
 def _request(method: str, path: str, payload: dict | None = None) -> dict:
     """
-    Sendet einen HTTP-Request an die baulog-REST-API.
-
-    Bei HTTPError wird {"success": False, "error": "HTTP <code>: <detail>"} zurückgegeben.
-    Bei URLError (Server nicht erreichbar) {"success": False, "error": "baulog nicht erreichbar …"}.
+    Sendet einen JSON-Request an die baulog-REST-API (siehe _send).
     """
-    url = BASE_URL.rstrip("/") + path
     body: bytes | None = None
     headers: dict = {}
     if payload is not None:
         body = json.dumps(payload).encode("utf-8")
         headers["Content-Type"] = "application/json"
+    return _send(method, path, body, headers)
+
+
+def _send(method: str, path: str, body: bytes | None, headers: dict) -> dict:
+    """
+    Schickt einen fertigen Request-Body an die API (JSON oder Multipart).
+
+    Bei HTTPError wird {"success": False, "error": "HTTP <code>: <detail>"} zurückgegeben.
+    Bei URLError (Server nicht erreichbar) {"success": False, "error": "baulog nicht erreichbar …"}.
+    """
+    url = BASE_URL.rstrip("/") + path
     req = urllib.request.Request(url, data=body, headers=headers, method=method)
     try:
         with urllib.request.urlopen(req, timeout=60) as resp:
@@ -90,6 +105,72 @@ def _put(path: str, payload: dict) -> dict:
 
 def _delete(path: str) -> dict:
     return _safe("DELETE", path)
+
+
+def _fehler(text: str) -> dict:
+    return {"success": False, "error": text}
+
+
+def _ok_antwort(res: dict) -> bool:
+    return res.get("success") is not False
+
+
+# ---------------------------------------------------------------------------
+# Eingaben normalisieren (Modelle schicken Ja/Nein und Daten oft als Text)
+# ---------------------------------------------------------------------------
+
+_JA = {"1", "true", "ja", "yes", "wahr", "mit", "bezahlt"}
+_NEIN = {"0", "false", "nein", "no", "falsch", "ohne", "offen", "none", ""}
+
+
+def _ja_nein(wert, feld: str):
+    """Wandelt True/False, 1/0 oder Text („ja“, „false“ …) in 1/0. Rückgabe (wert, fehler)."""
+    if isinstance(wert, bool):
+        return (1 if wert else 0), None
+    if isinstance(wert, (int, float)) and wert in (0, 1):
+        return int(wert), None
+    if isinstance(wert, str):
+        s = wert.strip().lower()
+        if s in _JA:
+            return 1, None
+        if s in _NEIN:
+            return 0, None
+    return None, _fehler(f"'{feld}' muss ja/nein sein (true/false), nicht {wert!r}.")
+
+
+def _datum(wert):
+    """
+    Akzeptiert YYYY-MM-DD, TT.MM.JJJJ, TT.MM.JJ, TT.MM. sowie heute/gestern/vorgestern.
+    Rückgabe (iso_datum | None, fehler). Leerer Wert → (None, None).
+    """
+    if wert is None:
+        return None, None
+    s = str(wert).strip().lower()
+    if not s:
+        return None, None
+    heute = date.today()
+    relativ = {"heute": 0, "gestern": 1, "vorgestern": 2}
+    if s in relativ:
+        return (heute - timedelta(days=relativ[s])).isoformat(), None
+    try:
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", s):
+            return date.fromisoformat(s).isoformat(), None
+        m = re.fullmatch(r"(\d{1,2})\.(\d{1,2})\.(\d{2}|\d{4})?", s)
+        if m:
+            jahr = m.group(3)
+            jahr = heute.year if not jahr else (2000 + int(jahr) if len(jahr) == 2 else int(jahr))
+            return date(jahr, int(m.group(2)), int(m.group(1))).isoformat(), None
+    except ValueError:
+        pass
+    return None, _fehler(f"Datum {wert!r} nicht erkannt. Erlaubt: YYYY-MM-DD, TT.MM.JJJJ, "
+                         f"heute, gestern, vorgestern.")
+
+
+_DOC_TYPEN = {"rechnung": "rechnung", "beleg": "beleg", "foto": "foto",
+              "bon": "beleg", "kassenbon": "beleg", "quittung": "beleg", "kassenzettel": "beleg",
+              "bild": "foto", "photo": "foto", "image": "foto", "invoice": "rechnung"}
+_ERLAUBTE_ENDUNGEN = {".jpg", ".jpeg", ".png", ".webp", ".pdf"}
+_MAX_UPLOAD = 20 * 1024 * 1024
 
 
 # ---------------------------------------------------------------------------
@@ -157,20 +238,62 @@ def _resolve_person(name: str) -> tuple[dict | None, dict | None]:
 # 1. Projekte
 # ---------------------------------------------------------------------------
 
-def projekt_anlegen(name: str, note: str = "") -> dict:
+def _projekt_baustelle(projekt_id: int) -> tuple[int | None, dict | None]:
     """
-    Legt ein neues Projekt an.
+    Liefert die Baustelle eines Projekts — wie in der Weboberfläche, die pro
+    Projekt genau eine Baustelle im Hintergrund führt. Hat das Projekt noch
+    keine, wird sie (benannt wie das Projekt) angelegt. Bei mehreren Bereichen
+    muss der Aufrufer baustelle_id angeben.
+    """
+    res = _get(f"/api/projects/{projekt_id}")
+    if not _ok_antwort(res):
+        return None, res
+    sites = res.get("sites", [])
+    if len(sites) == 1:
+        return sites[0]["id"], None
+    if not sites:
+        neu = _post("/api/sites", {"name": res["project"]["name"], "project_id": projekt_id})
+        if not _ok_antwort(neu):
+            return None, neu
+        return neu["id"], None
+    namen = ", ".join(f"{s['name']} (baustelle_id={s['id']})" for s in sites)
+    return None, _fehler(f"Projekt {projekt_id} hat mehrere Bereiche: {namen}. "
+                         f"Bitte baustelle_id angeben.")
+
+
+def projekt_anlegen(name: str, note: str = "", adresse: str = "") -> dict:
+    """
+    Legt ein neues Projekt an — der Einstieg für alles Weitere.
+
+    So ist baulog aufgebaut (wie in der Weboberfläche):
+      Projekt → Aufgaben → Stunden (inkl. Anfahrt), Material, Fotos/Belege.
+    Jedes Projekt hat automatisch genau eine Baustelle im Hintergrund; sie wird
+    hier gleich mit angelegt. baustelle_anlegen ist NICHT nötig.
+    Danach: aufgabe_anlegen(projekt_id=…, titel=…), dann zeiteintrag_anlegen /
+    material_anlegen / dokument_hochladen mit der aufgabe_id.
+    Vorher mit projekte_liste prüfen, ob es das Projekt schon gibt.
 
     Parameter:
-        name  — Pflichtfeld: Projektbezeichnung, z. B. „Umbau MFH Deisterstraße 40".
-        note  — Optionale Notiz / Beschreibung zum Projekt (Standard: leer).
+        name    — Pflichtfeld: Projektbezeichnung, z. B. „Renovierung 1 OG Miethaus".
+        note    — Optionale Beschreibung zum Projekt.
+        adresse — Optionale Adresse (Straße, Ort). Nicht erfinden.
 
-    Rückgabe: {"status": "ok", "id": <neue Projekt-ID>}
+    Rückgabe: {"status": "ok", "id": <Projekt-ID>, "baustelle_id": <ID der Hintergrund-Baustelle>}
     """
     payload: dict = {"name": name}
     if note:
         payload["note"] = note
-    return _post("/api/projects", payload)
+    res = _post("/api/projects", payload)
+    if not _ok_antwort(res):
+        return res
+    site: dict = {"name": name, "project_id": res["id"]}
+    if adresse:
+        site["address"] = adresse
+    s = _post("/api/sites", site)
+    if not _ok_antwort(s):
+        return {**s, "projekt_id": res["id"],
+                "hinweis": "Projekt wurde angelegt, die Baustelle nicht."}
+    return {"status": "ok", "id": res["id"], "baustelle_id": s["id"]}
 
 
 def projekte_liste() -> dict:
@@ -196,7 +319,7 @@ def projekt_details(projekt_id: int) -> dict:
     return _get(f"/api/projects/{projekt_id}")
 
 
-def projekt_bearbeiten(projekt_id: int, name: str | None = None, note: str | None = None) -> dict:
+def projekt_bearbeiten(projekt_id: int, name: str = None, note: str = None) -> dict:
     """
     Ändert Name und/oder Notiz eines bestehenden Projekts.
 
@@ -239,7 +362,11 @@ def baustelle_anlegen(
     note: str = "",
 ) -> dict:
     """
-    Legt eine neue Baustelle innerhalb eines Projekts an.
+    Legt einen ZUSÄTZLICHEN Bereich (Baustelle) in einem Projekt an.
+
+    Normalerweise NICHT nötig: projekt_anlegen legt die Baustelle schon mit an,
+    und in der Weboberfläche hat jedes Projekt genau eine. Nur verwenden, wenn
+    Sven ausdrücklich getrennte Bereiche will (z. B. „EG“ und „Dach“).
 
     Parameter:
         name       — Pflichtfeld: Name der Baustelle, z. B. „MFH Deisterstraße 40, Feggendorf".
@@ -257,7 +384,7 @@ def baustelle_anlegen(
     return _post("/api/sites", payload)
 
 
-def baustellen_liste(projekt_id: int | None = None) -> dict:
+def baustellen_liste(projekt_id: int = None) -> dict:
     """
     Gibt alle Baustellen zurück, optional nach Projekt gefiltert.
 
@@ -287,11 +414,11 @@ def baustelle_details(baustelle_id: int) -> dict:
 
 def baustelle_bearbeiten(
     baustelle_id: int,
-    name: str | None = None,
-    address: str | None = None,
-    status: str | None = None,
-    note: str | None = None,
-    projekt_id: int | None = None,
+    name: str = None,
+    address: str = None,
+    status: str = None,
+    note: str = None,
+    projekt_id: int = None,
 ) -> dict:
     """
     Ändert Felder einer bestehenden Baustelle.
@@ -393,26 +520,57 @@ def gewerk_loeschen(gewerk_id: int) -> dict:
 # 4. Aufgaben
 # ---------------------------------------------------------------------------
 
+def _gewerk_id(baustelle_id: int, gewerk: str) -> tuple[int | None, dict | None]:
+    """Findet ein Gewerk der Baustelle per Name (ohne Groß-/Kleinschreibung) oder legt es an."""
+    res = _get(f"/api/sites/{baustelle_id}/trades")
+    if not _ok_antwort(res):
+        return None, res
+    for t in res.get("trades", []):
+        if t["name"].strip().lower() == gewerk.strip().lower():
+            return t["id"], None
+    neu = _post(f"/api/sites/{baustelle_id}/trades", {"name": gewerk.strip()})
+    if not _ok_antwort(neu):
+        return None, neu
+    return neu["id"], None
+
+
 def aufgabe_anlegen(
-    baustelle_id: int,
     titel: str,
-    gewerk_id: int | None = None,
+    projekt_id: int = None,
+    baustelle_id: int = None,
+    gewerk: str = "",
+    gewerk_id: int = None,
     status: str = "offen",
     beschreibung: str = "",
 ) -> dict:
     """
-    Legt eine neue Aufgabe innerhalb einer Baustelle an.
+    Legt eine Aufgabe in einem Projekt an, z. B. „Trockenbau Bad", „Fenstertausch"
+    oder einfach „Allgemein". Stunden, Material und Belege hängen immer an einer
+    Aufgabe. Vorher mit aufgaben_liste(projekt_id=…) prüfen, ob es schon eine
+    passende gibt — nicht doppelt anlegen.
 
     Parameter:
-        baustelle_id — Pflichtfeld: ID der Baustelle (int).
-        titel        — Pflichtfeld: Kurztitel der Aufgabe, z. B. „Wand ziehen".
-        gewerk_id    — ID des zugehörigen Gewerks (int, optional).
-        status       — Aufgabenstatus: „offen" (Standard), „in Arbeit" oder „fertig".
-        beschreibung — Ausführliche Beschreibung / Notizen zur Aufgabe (optional).
+        titel        — Pflichtfeld: Bezeichnung der Aufgabe.
+        projekt_id   — ID des Projekts (Normalfall); die Baustelle wird automatisch ermittelt.
+        baustelle_id — Nur bei Projekten mit mehreren Bereichen statt projekt_id angeben.
+        gewerk       — Optionaler Gewerk-Name, z. B. „Trockenbau"; wird bei Bedarf angelegt.
+        gewerk_id    — Alternativ die ID eines bestehenden Gewerks.
+        status       — „offen" (Standard), „in Arbeit" oder „fertig".
+        beschreibung — Optionale Notiz zur Aufgabe.
 
-    Rückgabe: {"status": "ok", "id": <neue Aufgaben-ID>}
+    Rückgabe: {"status": "ok", "id": <aufgabe_id>}
     """
+    if baustelle_id is None:
+        if projekt_id is None:
+            return _fehler("projekt_id angeben (bei mehreren Bereichen stattdessen baustelle_id).")
+        baustelle_id, err = _projekt_baustelle(projekt_id)
+        if err:
+            return err
     payload: dict = {"title": titel, "status": status}
+    if gewerk_id is None and gewerk and gewerk.strip():
+        gewerk_id, err = _gewerk_id(baustelle_id, gewerk)
+        if err:
+            return err
     if gewerk_id is not None:
         payload["trade_id"] = gewerk_id
     if beschreibung:
@@ -421,50 +579,43 @@ def aufgabe_anlegen(
 
 
 def aufgaben_liste(
-    baustelle_id: int | None = None,
-    gewerk_id: int | None = None,
-    status: str | None = None,
+    projekt_id: int = None,
+    baustelle_id: int = None,
+    gewerk_id: int = None,
+    status: str = None,
 ) -> dict:
     """
-    Gibt Aufgaben zurück, filterbar nach Baustelle, Gewerk und Status.
-
-    Wenn baustelle_id angegeben ist, werden nur Aufgaben dieser Baustelle zurückgegeben.
-    Ohne baustelle_id werden alle Baustellen abgefragt und die Aufgaben aggregiert
-    (erfordert einen zusätzlichen Aufruf von baustellen_liste).
+    Gibt Aufgaben zurück (mit aufgabe_id = "id", Titel, Status, Kosten), filterbar
+    nach Projekt, Baustelle, Gewerk und Status.
 
     Parameter:
-        baustelle_id — ID der Baustelle (int, optional). Ohne Angabe: alle Baustellen.
-        gewerk_id    — Nur Aufgaben dieses Gewerks anzeigen (int, optional).
-        status       — Nur Aufgaben mit diesem Status: „offen", „in Arbeit" oder „fertig"
-                       (optional).
+        projekt_id   — Nur Aufgaben dieses Projekts (Normalfall).
+        baustelle_id — Nur Aufgaben dieser Baustelle / dieses Bereichs.
+        gewerk_id    — Nur Aufgaben dieses Gewerks.
+        status       — Nur Aufgaben mit Status „offen", „in Arbeit" oder „fertig".
+        Ohne projekt_id und baustelle_id: Aufgaben aller Projekte.
 
     Rückgabe: {"status": "ok", "tasks": [...]}
     """
+    params: list[str] = []
+    if gewerk_id is not None:
+        params.append(f"trade={gewerk_id}")
+    if status is not None:
+        params.append(f"status={urllib.parse.quote(status)}")
+    qs = ("?" + "&".join(params)) if params else ""
+
     if baustelle_id is not None:
-        params: list[str] = []
-        if gewerk_id is not None:
-            params.append(f"trade={gewerk_id}")
-        if status is not None:
-            params.append(f"status={urllib.parse.quote(status)}")
-        qs = ("?" + "&".join(params)) if params else ""
         return _get(f"/api/sites/{baustelle_id}/tasks{qs}")
 
-    # Kein baustelle_id — alle Baustellen holen und Aufgaben aggregieren
-    sites_resp = _get("/api/sites")
-    if sites_resp.get("success") is False:
+    sites_resp = _get(f"/api/sites?project={projekt_id}" if projekt_id is not None else "/api/sites")
+    if not _ok_antwort(sites_resp):
         return sites_resp
     all_tasks: list[dict] = []
     for site in sites_resp.get("sites", []):
-        sid = site["id"]
-        params_l: list[str] = []
-        if gewerk_id is not None:
-            params_l.append(f"trade={gewerk_id}")
-        if status is not None:
-            params_l.append(f"status={urllib.parse.quote(status)}")
-        qs = ("?" + "&".join(params_l)) if params_l else ""
-        resp = _get(f"/api/sites/{sid}/tasks{qs}")
-        if resp.get("status") == "ok":
-            all_tasks.extend(resp.get("tasks", []))
+        resp = _get(f"/api/sites/{site['id']}/tasks{qs}")
+        if not _ok_antwort(resp):
+            return resp
+        all_tasks.extend(resp.get("tasks", []))
     return {"status": "ok", "tasks": all_tasks}
 
 
@@ -484,26 +635,38 @@ def aufgabe_details(aufgabe_id: int) -> dict:
 
 def aufgabe_bearbeiten(
     aufgabe_id: int,
-    titel: str | None = None,
-    gewerk_id: int | None = None,
-    status: str | None = None,
-    beschreibung: str | None = None,
+    titel: str = None,
+    gewerk: str = None,
+    gewerk_id: int = None,
+    status: str = None,
+    beschreibung: str = None,
 ) -> dict:
     """
-    Ändert Felder einer bestehenden Aufgabe.
+    Ändert Felder einer bestehenden Aufgabe (nur die angegebenen).
 
     Parameter:
         aufgabe_id   — ID der zu ändernden Aufgabe (int).
-        titel        — Neuer Titel (optional).
-        gewerk_id    — Neue Gewerk-ID (int, optional; None lässt den aktuellen Wert unverändert).
-        status       — Neuer Status: „offen", „in Arbeit" oder „fertig" (optional).
-        beschreibung — Neue Beschreibung (optional).
+        titel        — Neuer Titel.
+        gewerk       — Gewerk per Name setzen (wird bei Bedarf angelegt); "" entfernt das Gewerk.
+        gewerk_id    — Alternativ: ID eines bestehenden Gewerks.
+        status       — Neuer Status: „offen", „in Arbeit" oder „fertig".
+        beschreibung — Neue Beschreibung.
 
     Rückgabe: {"status": "ok"}
     """
     payload: dict = {}
     if titel is not None:
         payload["title"] = titel
+    if gewerk is not None and gewerk_id is None:
+        if not gewerk.strip():
+            payload["trade_id"] = None
+        else:
+            task = _get(f"/api/tasks/{aufgabe_id}")
+            if not _ok_antwort(task):
+                return task
+            gewerk_id, err = _gewerk_id(task["task"]["site_id"], gewerk)
+            if err:
+                return err
     if gewerk_id is not None:
         payload["trade_id"] = gewerk_id
     if status is not None:
@@ -531,35 +694,54 @@ def aufgabe_loeschen(aufgabe_id: int) -> dict:
 # ---------------------------------------------------------------------------
 
 def zeiteintrag_anlegen(aufgabe_id: int, person: str, stunden: float,
-                        stundensatz: float = None, mit_rechnung: bool = True,
-                        datum: str = "", bezahlt: bool = False) -> dict:
+                        datum: str = "", stundensatz: float = None,
+                        anfahrt: float = 0.0, mit_rechnung: bool = True,
+                        bezahlt: bool = False, bereits_gezahlt: float = None) -> dict:
     """
-    Erfasst Arbeitszeit (Personalkosten) auf einer Aufgabe. Kosten = Stunden × Satz.
+    Erfasst einen Arbeitstag einer Person: Stunden (+ optional Anfahrt) auf einer Aufgabe.
+    Kosten = Stunden × Stundensatz + Anfahrt. Ein Eintrag je Person und Tag.
 
-    :param aufgabe_id: ID der Aufgabe (aus aufgaben_liste).
-    :param person: Name der Person — muss in den Personen-Stammdaten existieren
-                   (siehe personen_liste; neue Personen mit person_anlegen anlegen).
-    :param stunden: Stundenaufwand (> 0), z. B. 7.5.
-    :param stundensatz: Stundensatz in Euro/Stunde; wenn weggelassen, gilt der
-                        Standard-Satz der Person. Hat die Person keinen Satz
-                        hinterlegt (0), wird der Aufruf mit einem Fehler
-                        abgelehnt — dann entweder den Satz der Person pflegen
-                        (person_bearbeiten) oder hier explizit angeben
-                        (0 nur für bewusst unbezahlte Eigenleistung).
-    :param mit_rechnung: True = mit Rechnung (dokumentiert), False = ohne Rechnung.
-    :param datum: Tag der Leistung als YYYY-MM-DD, optional.
-    :param bezahlt: True = bereits bezahlt, False = noch offen (Standard).
+    Vorher mit projekt_uebersicht prüfen, ob der Tag schon erfasst ist (nicht doppelt anlegen).
+
+    :param aufgabe_id: ID der Aufgabe (aus aufgaben_liste oder projekt_uebersicht).
+    :param person: Name der Person — muss in den Stammdaten existieren
+                   (personen_liste; neue Personen zuerst mit person_anlegen).
+    :param stunden: Stunden an diesem Tag (> 0), z. B. 6.5.
+    :param datum: Tag der Arbeit: YYYY-MM-DD, TT.MM.JJJJ, „heute", „gestern" oder
+                  „vorgestern". Immer angeben, wenn Sven einen Tag nennt.
+    :param stundensatz: Euro/Stunde; weglassen = Standard-Satz der Person. Hat die
+                        Person keinen Satz (0), wird abgelehnt — dann Satz der Person
+                        pflegen (person_bearbeiten) oder hier angeben (0 nur für
+                        bewusst unbezahlte Eigenleistung).
+    :param anfahrt: Anfahrt in Euro für diesen Arbeitstag, z. B. 10. Anfahrten IMMER
+                    hier mitgeben — NICHT als Material („Anfahrt …") anlegen.
+    :param mit_rechnung: True = mit Rechnung (Standard), False = ohne Rechnung.
+    :param bezahlt: True = schon bezahlt, False = noch offen (Standard).
+                    mit_rechnung und bezahlt sind unabhängig voneinander.
+    :param bereits_gezahlt: Teilzahlung in Euro (z. B. 50), Rest bleibt offen. Nur bei
+                    bezahlt=False; ab dem vollen Betrag gilt der Eintrag als bezahlt.
     """
     p, err = _resolve_person(person)
     if err:
         return err
-    payload = {"person_id": p["id"], "hours": stunden,
-               "billed": 1 if mit_rechnung else 0,
-               "paid": 1 if bezahlt else 0}
+    billed, err = _ja_nein(mit_rechnung, "mit_rechnung")
+    if err:
+        return err
+    paid, err = _ja_nein(bezahlt, "bezahlt")
+    if err:
+        return err
+    work_date, err = _datum(datum)
+    if err:
+        return err
+    payload = {"person_id": p["id"], "hours": stunden, "billed": billed, "paid": paid}
+    if bereits_gezahlt:
+        payload["paid_amount"] = bereits_gezahlt
     if stundensatz is not None:
         payload["hourly_rate"] = stundensatz
-    if datum:
-        payload["work_date"] = datum
+    if work_date:
+        payload["work_date"] = work_date
+    if anfahrt:
+        payload["travel_cost"] = anfahrt
     return _post(f"/api/tasks/{aufgabe_id}/timeentries", payload)
 
 
@@ -579,19 +761,29 @@ def zeiteintraege_liste(aufgabe_id: int) -> dict:
 def zeiteintrag_bearbeiten(zeiteintrag_id: int, person: str = None,
                            stunden: float = None, stundensatz: float = None,
                            mit_rechnung: bool = None, datum: str = None,
-                           bezahlt: bool = None) -> dict:
+                           bezahlt: bool = None, anfahrt: float = None,
+                           bereits_gezahlt: float = None) -> dict:
     """
     Ändert nur die angegebenen Felder eines Zeiteintrags.
 
-    :param zeiteintrag_id: ID des Zeiteintrags (aus zeiteintraege_liste).
+    :param zeiteintrag_id: ID des Zeiteintrags (aus projekt_uebersicht oder zeiteintraege_liste).
     :param person: Neuer Personenname — muss in den Stammdaten existieren.
     :param stunden: Neuer Stundenaufwand (> 0).
     :param stundensatz: Neuer Stundensatz in Euro/Stunde (>= 0).
     :param mit_rechnung: True = mit Rechnung, False = ohne Rechnung.
-    :param datum: Tag der Leistung als YYYY-MM-DD.
-    :param bezahlt: True = bezahlt, False = offen (optional).
+    :param datum: Tag der Arbeit (YYYY-MM-DD, TT.MM.JJJJ, heute, gestern); "" entfernt das Datum.
+    :param bezahlt: True = bezahlt, False = offen.
+    :param anfahrt: Anfahrt in Euro für diesen Arbeitstag (0 = keine Anfahrt).
+    :param bereits_gezahlt: Teilzahlung in Euro für DIESEN Eintrag (Gesamtstand, nicht
+                    zusätzlich); Rest bleibt offen. 0 = nichts gezahlt. Ab dem vollen
+                    Betrag gilt der Eintrag als bezahlt. Nicht zusammen mit bezahlt.
+                    Für Beträge über mehrere Tage: person_auszahlung.
     """
     payload = {}
+    if bereits_gezahlt is not None:
+        if bezahlt is not None:
+            return _fehler("bezahlt und bereits_gezahlt nicht gleichzeitig angeben.")
+        payload["paid_amount"] = bereits_gezahlt
     if person is not None:
         p, err = _resolve_person(person)
         if err:
@@ -602,11 +794,19 @@ def zeiteintrag_bearbeiten(zeiteintrag_id: int, person: str = None,
     if stundensatz is not None:
         payload["hourly_rate"] = stundensatz
     if mit_rechnung is not None:
-        payload["billed"] = 1 if mit_rechnung else 0
+        payload["billed"], err = _ja_nein(mit_rechnung, "mit_rechnung")
+        if err:
+            return err
     if bezahlt is not None:
-        payload["paid"] = 1 if bezahlt else 0
+        payload["paid"], err = _ja_nein(bezahlt, "bezahlt")
+        if err:
+            return err
+    if anfahrt is not None:
+        payload["travel_cost"] = anfahrt
     if datum is not None:
-        payload["work_date"] = datum or None
+        payload["work_date"], err = _datum(datum)
+        if err:
+            return err
     return _put(f"/api/timeentries/{zeiteintrag_id}", payload)
 
 
@@ -644,7 +844,10 @@ def personen_liste(nur_aktive: bool = True) -> dict:
 
     :param nur_aktive: True = nur aktive Personen (Standard), False = alle.
     """
-    return _get("/api/persons?active=1" if nur_aktive else "/api/persons")
+    aktiv, err = _ja_nein(nur_aktive, "nur_aktive")
+    if err:
+        return err
+    return _get("/api/persons?active=1" if aktiv else "/api/persons")
 
 
 def person_bearbeiten(person_id: int, name: str = None, stundensatz: float = None,
@@ -665,7 +868,9 @@ def person_bearbeiten(person_id: int, name: str = None, stundensatz: float = Non
     if stundensatz is not None:
         payload["hourly_rate"] = stundensatz
     if aktiv is not None:
-        payload["active"] = 1 if aktiv else 0
+        payload["active"], err = _ja_nein(aktiv, "aktiv")
+        if err:
+            return err
     if note is not None:
         payload["note"] = note
     return _put(f"/api/persons/{person_id}", payload)
@@ -694,31 +899,42 @@ def material_anlegen(
     einheit: str = "Stk",
     mit_rechnung: bool = True,
     bezahlt: bool = False,
+    bereits_gezahlt: float = None,
 ) -> dict:
     """
-    Legt eine Materialposition zu einer Aufgabe an.
+    Legt eine Materialposition / Ausgabe zu einer Aufgabe an (Einkauf, Miete, Entsorgung …).
+    Kosten = Menge × Einzelpreis. Bei einem Gesamtbetrag: menge=1, einzelpreis=Betrag.
 
-    Die Kosten werden serverseitig berechnet: Kosten = Menge × Einzelpreis.
+    Anfahrten NICHT hier erfassen, sondern als anfahrt bei zeiteintrag_anlegen.
+    Einen Kassenbon/eine Rechnung danach mit dokument_hochladen(material_id=…) anhängen.
 
     Parameter:
         aufgabe_id   — Pflichtfeld: ID der zugehörigen Aufgabe (int).
-        bezeichnung  — Pflichtfeld: Bezeichnung des Materials, z. B. „Zement 25 kg Sack".
-        menge        — Pflichtfeld: Menge (float, z. B. 10.0).
-        einzelpreis  — Pflichtfeld: Einzelpreis in Euro (float, z. B. 8.50).
-        einheit      — Mengeneinheit: z. B. „Stk", „m²", „kg", „l", „lfm" (Standard: „Stk").
-        mit_rechnung — True = mit Rechnung (dokumentiert/versteuerbar, Standard),
-                       False = ohne Rechnung.
+        bezeichnung  — Pflichtfeld: Was wurde gekauft, z. B. „Zement 25 kg Sack".
+        menge        — Pflichtfeld: Menge (z. B. 10).
+        einzelpreis  — Pflichtfeld: Preis je Einheit in Euro (z. B. 8.50).
+        einheit      — Mengeneinheit: „Stk" (Standard), „m²", „kg", „l", „Sack", „Pauschal" …
+        mit_rechnung — True = mit Rechnung (Standard), False = ohne Rechnung (z. B. Barkauf).
+        bezahlt      — True = schon bezahlt, False = noch offen (Standard).
 
-    Rückgabe: {"status": "ok", "id": <neue Material-ID>}
+    Rückgabe: {"status": "ok", "id": <material_id>}
     """
+    billed, err = _ja_nein(mit_rechnung, "mit_rechnung")
+    if err:
+        return err
+    paid, err = _ja_nein(bezahlt, "bezahlt")
+    if err:
+        return err
     payload: dict = {
         "name": bezeichnung,
         "qty": menge,
         "unit_price": einzelpreis,
         "unit": einheit,
-        "billed": 1 if mit_rechnung else 0,
-        "paid": 1 if bezahlt else 0,
+        "billed": billed,
+        "paid": paid,
     }
+    if bereits_gezahlt:
+        payload["paid_amount"] = bereits_gezahlt
     return _post(f"/api/tasks/{aufgabe_id}/materials", payload)
 
 
@@ -737,27 +953,35 @@ def materialien_liste(aufgabe_id: int) -> dict:
 
 def material_bearbeiten(
     material_id: int,
-    bezeichnung: str | None = None,
-    menge: float | None = None,
-    einheit: str | None = None,
-    einzelpreis: float | None = None,
-    mit_rechnung: bool | None = None,
-    bezahlt: bool | None = None,
+    bezeichnung: str = None,
+    menge: float = None,
+    einheit: str = None,
+    einzelpreis: float = None,
+    mit_rechnung: bool = None,
+    bezahlt: bool = None,
+    bereits_gezahlt: float = None,
 ) -> dict:
     """
-    Ändert Felder einer bestehenden Materialposition.
+    Ändert nur die angegebenen Felder einer Materialposition.
 
     Parameter:
-        material_id  — ID der zu ändernden Materialposition (int).
-        bezeichnung  — Neue Bezeichnung (optional).
-        menge        — Neue Menge (float, optional).
-        einheit      — Neue Mengeneinheit, z. B. „m²", „kg" (optional).
-        einzelpreis  — Neuer Einzelpreis in Euro (float, optional).
-        mit_rechnung — True = mit Rechnung, False = ohne Rechnung (optional).
+        material_id  — ID der Materialposition (aus projekt_uebersicht oder materialien_liste).
+        bezeichnung  — Neue Bezeichnung.
+        menge        — Neue Menge.
+        einheit      — Neue Mengeneinheit, z. B. „m²", „kg".
+        einzelpreis  — Neuer Einzelpreis in Euro.
+        mit_rechnung — True = mit Rechnung, False = ohne Rechnung.
+        bezahlt      — True = bezahlt, False = offen.
+        bereits_gezahlt — Teilzahlung in Euro (Gesamtstand); Rest bleibt offen. Nicht
+                       zusammen mit bezahlt.
 
     Rückgabe: {"status": "ok"}
     """
     payload: dict = {}
+    if bereits_gezahlt is not None:
+        if bezahlt is not None:
+            return _fehler("bezahlt und bereits_gezahlt nicht gleichzeitig angeben.")
+        payload["paid_amount"] = bereits_gezahlt
     if bezeichnung is not None:
         payload["name"] = bezeichnung
     if menge is not None:
@@ -767,9 +991,13 @@ def material_bearbeiten(
     if einzelpreis is not None:
         payload["unit_price"] = einzelpreis
     if mit_rechnung is not None:
-        payload["billed"] = 1 if mit_rechnung else 0
+        payload["billed"], err = _ja_nein(mit_rechnung, "mit_rechnung")
+        if err:
+            return err
     if bezahlt is not None:
-        payload["paid"] = 1 if bezahlt else 0
+        payload["paid"], err = _ja_nein(bezahlt, "bezahlt")
+        if err:
+            return err
     return _put(f"/api/materials/{material_id}", payload)
 
 
@@ -850,6 +1078,201 @@ def gesamt_summary() -> dict:
     return _get("/api/summary")
 
 
+def _r2(wert) -> float:
+    return round(float(wert or 0), 2)
+
+
+def projekt_uebersicht(projekt_id: int) -> dict:
+    """
+    ALLES zu einem Projekt in einem Aufruf — der beste Einstieg, bevor etwas
+    erfasst, geändert oder als bezahlt markiert wird (zeigt auch, ob ein Tag
+    schon erfasst ist). Entspricht der Projektseite der Weboberfläche.
+
+    Parameter:
+        projekt_id — ID des Projekts (aus projekte_liste).
+
+    Rückgabe (deutsche Felder, Beträge in Euro, IDs direkt für die anderen Tools):
+      projekt, bereiche[] (baustelle_id …),
+      aufgaben[]  (aufgabe_id, titel, status, gewerk, baustelle_id),
+      stunden[]   (zeiteintrag_id, aufgabe_id, datum, person, stunden, stundensatz,
+                   anfahrt, betrag, mit_rechnung, bezahlt, teilweise_gezahlt, gezahlt,
+                   offen) — neueste zuerst. teilweise_gezahlt = Teilzahlung (Euro) bei
+                   noch nicht voll bezahlten Posten; offen = Restbetrag,
+      material[]  (material_id, aufgabe_id, erfasst_am, bezeichnung, menge, einheit,
+                   einzelpreis, betrag, mit_rechnung, bezahlt, teilweise_gezahlt,
+                   gezahlt, offen),
+      dokumente[] (dokument_id, dateiname, typ, aufgabe_id, material_id, erfasst_am),
+      summen      (gesamt, arbeit, anfahrt, material, stunden, mit_rechnung,
+                   ohne_rechnung, bezahlt, offen),
+      je_person[] (person, stunden, anfahrt, kosten, offen).
+    """
+    pd = _get(f"/api/projects/{projekt_id}")
+    if not _ok_antwort(pd):
+        return pd
+    sites = pd.get("sites", [])
+    gewerke: dict = {}
+    aufgaben, stunden, material = [], [], []
+    dokumente: dict = {}
+    for s in sites:
+        sd = _get(f"/api/sites/{s['id']}")
+        tl = _get(f"/api/sites/{s['id']}/tasks")
+        dl = _get(f"/api/documents?site_id={s['id']}")
+        for res in (sd, tl, dl):
+            if not _ok_antwort(res):
+                return res
+        gewerke.update({t["id"]: t["name"] for t in sd.get("trades", [])})
+        for d in dl.get("documents", []):
+            dokumente[d["id"]] = d
+        for t in tl.get("tasks", []):
+            det = _get(f"/api/tasks/{t['id']}")
+            if not _ok_antwort(det):
+                return det
+            aufgaben.append({"aufgabe_id": t["id"], "titel": t["title"], "status": t["status"],
+                             "gewerk": gewerke.get(t["trade_id"]), "baustelle_id": t["site_id"]})
+            for e in det.get("time_entries", []):
+                anfahrt = e.get("travel_cost") or 0
+                stunden.append({
+                    "zeiteintrag_id": e["id"], "aufgabe_id": t["id"],
+                    "datum": e["work_date"] or (e["created_at"] or "")[:10],
+                    "ohne_arbeitsdatum": not e["work_date"],
+                    "person": e["person"], "stunden": e["hours"], "stundensatz": e["hourly_rate"],
+                    "anfahrt": anfahrt, "betrag": _r2(e["hours"] * e["hourly_rate"] + anfahrt),
+                    "mit_rechnung": bool(e["billed"]), "bezahlt": bool(e["paid"]),
+                    "teilweise_gezahlt": _r2(e.get("paid_amount") or 0) if not e["paid"] else 0,
+                })
+            for m in det.get("materials", []):
+                material.append({
+                    "material_id": m["id"], "aufgabe_id": t["id"],
+                    "erfasst_am": (m["created_at"] or "")[:10], "bezeichnung": m["name"],
+                    "menge": m["qty"], "einheit": m["unit"], "einzelpreis": m["unit_price"],
+                    "betrag": _r2(m["qty"] * m["unit_price"]),
+                    "mit_rechnung": bool(m["billed"]), "bezahlt": bool(m["paid"]),
+                    "teilweise_gezahlt": _r2(m.get("paid_amount") or 0) if not m["paid"] else 0,
+                })
+            for d in det.get("documents", []):
+                dokumente[d["id"]] = d
+    stunden.sort(key=lambda e: (e["datum"], e["zeiteintrag_id"]), reverse=True)
+    material.sort(key=lambda m: (m["erfasst_am"], m["material_id"]), reverse=True)
+
+    alle = stunden + material
+    for x in alle:
+        x["gezahlt"] = x["betrag"] if x["bezahlt"] else x["teilweise_gezahlt"]
+        x["offen"] = _r2(x["betrag"] - x["gezahlt"])
+    summen = {
+        "gesamt": _r2(sum(x["betrag"] for x in alle)),
+        "arbeit": _r2(sum(e["betrag"] - e["anfahrt"] for e in stunden)),
+        "anfahrt": _r2(sum(e["anfahrt"] for e in stunden)),
+        "material": _r2(sum(m["betrag"] for m in material)),
+        "stunden": _r2(sum(e["stunden"] for e in stunden)),
+        "mit_rechnung": _r2(sum(x["betrag"] for x in alle if x["mit_rechnung"])),
+        "ohne_rechnung": _r2(sum(x["betrag"] for x in alle if not x["mit_rechnung"])),
+        "bezahlt": _r2(sum(x["gezahlt"] for x in alle)),
+        "offen": _r2(sum(x["offen"] for x in alle)),
+    }
+    je_person: dict = {}
+    for e in stunden:
+        p = je_person.setdefault(e["person"], {"person": e["person"], "stunden": 0,
+                                               "anfahrt": 0, "kosten": 0, "offen": 0})
+        p["stunden"] += e["stunden"]
+        p["anfahrt"] += e["anfahrt"]
+        p["kosten"] += e["betrag"]
+        p["offen"] += e["offen"]
+    for p in je_person.values():
+        for k in ("stunden", "anfahrt", "kosten", "offen"):
+            p[k] = _r2(p[k])
+
+    return {
+        "status": "ok",
+        "projekt": {"projekt_id": pd["project"]["id"], "name": pd["project"]["name"],
+                    "notiz": pd["project"]["note"]},
+        "bereiche": [{"baustelle_id": s["id"], "name": s["name"], "adresse": s["address"],
+                      "status": s["status"]} for s in sites],
+        "aufgaben": aufgaben,
+        "stunden": stunden,
+        "material": material,
+        "dokumente": [{"dokument_id": d["id"], "dateiname": d["filename"], "typ": d["doc_type"],
+                       "aufgabe_id": d["task_id"], "material_id": d["material_id"],
+                       "erfasst_am": (d["created_at"] or "")[:10],
+                       "in_paperless": bool(d["paperless_id"])}
+                      for d in sorted(dokumente.values(), key=lambda d: d["id"], reverse=True)],
+        "summen": summen,
+        "je_person": sorted(je_person.values(), key=lambda p: -p["kosten"]),
+    }
+
+
+def person_bezahlt_markieren(projekt_id: int, person: str, bezahlt: bool = True,
+                             bis_datum: str = "") -> dict:
+    """
+    Setzt den Zahlungsstatus ALLER Stunden-Einträge (inkl. Anfahrt) einer Person
+    in einem Projekt auf einmal — z. B. „Robert ist bis Freitag ausgezahlt"
+    → person_bezahlt_markieren(projekt_id, "Robert", bis_datum="2026-11-06").
+    Ändert nur Einträge mit anderem Status. Einzelne Einträge stattdessen mit
+    zeiteintrag_bearbeiten(bezahlt=…), Material mit material_bearbeiten(bezahlt=…).
+
+    Parameter:
+        projekt_id — ID des Projekts.
+        person     — Name der Person, z. B. „Robert".
+        bezahlt    — True = als bezahlt markieren (Standard), False = wieder auf offen.
+        bis_datum  — Optional: nur Arbeitstage bis einschließlich dieses Datums
+                     (YYYY-MM-DD, TT.MM.JJJJ, heute, gestern). Einträge ohne
+                     Arbeitsdatum zählen mit ihrem Erfassungsdatum.
+
+    Rückgabe: {"status": "ok", "geaendert": [...], "anzahl", "summe", "offen_danach"}
+    """
+    ziel, err = _ja_nein(bezahlt, "bezahlt")
+    if err:
+        return err
+    grenze, err = _datum(bis_datum)
+    if err:
+        return err
+    ueb = projekt_uebersicht(projekt_id)
+    if not _ok_antwort(ueb):
+        return ueb
+    eigene = [e for e in ueb["stunden"] if e["person"].lower() == person.strip().lower()]
+    if not eigene:
+        namen = ", ".join(sorted({e["person"] for e in ueb["stunden"]})) or "keine"
+        return _fehler(f"Keine Stunden von '{person}' in Projekt {projekt_id}. "
+                       f"Personen mit Stunden in diesem Projekt: {namen}.")
+    geaendert = []
+    for e in eigene:
+        if e["bezahlt"] == bool(ziel) or (grenze and e["datum"] > grenze):
+            continue
+        res = _put(f"/api/timeentries/{e['zeiteintrag_id']}", {"paid": ziel})
+        if not _ok_antwort(res):
+            return {**res, "bereits_geaendert": geaendert}
+        e["bezahlt"] = bool(ziel)
+        geaendert.append({k: e[k] for k in ("zeiteintrag_id", "datum", "stunden", "anfahrt", "betrag")})
+    return {
+        "status": "ok",
+        "geaendert": geaendert,
+        "anzahl": len(geaendert),
+        "summe": _r2(sum(g["betrag"] for g in geaendert)),
+        "offen_danach": _r2(sum(e["betrag"] for e in eigene if not e["bezahlt"])),
+    }
+
+
+def person_auszahlung(projekt_id: int, person: str, betrag: float) -> dict:
+    """
+    Verbucht eine (Teil-)Auszahlung an eine Person in einem Projekt, z. B.
+    „Robert 200 € gegeben“ → person_auszahlung(projekt_id, "Robert", 200).
+    Der Betrag wird auf die offenen Stunden-Einträge (inkl. Anfahrt) der Person
+    verteilt — älteste Arbeitstage zuerst. Voll gedeckte Tage werden „bezahlt“,
+    der letzte ggf. nur teilweise (Restbetrag bleibt offen). Mehrfach aufrufbar;
+    Beträge addieren sich. Mehr als offen wird abgelehnt.
+
+    Für EINEN bestimmten Tag stattdessen zeiteintrag_bearbeiten(bereits_gezahlt=…).
+
+    Parameter:
+        projekt_id — ID des Projekts.
+        person     — Name, z. B. „Robert“.
+        betrag     — Ausgezahlter Betrag in Euro (> 0).
+
+    Rückgabe: {"status": "ok", "verteilt": [{id, work_date, betrag, anteil, bezahlt,
+               gezahlt_gesamt}], "rest_offen": <Euro offen bei dieser Person>}
+    """
+    return _post(f"/api/projects/{projekt_id}/payout", {"person": person, "amount": betrag})
+
+
 def dashboard_summary(projekt_id: int = None, baustelle_id: int = None) -> dict:
     """
     Liefert den kompletten Dashboard-Datensatz: KPIs (Kosten mit/ohne Rechnung,
@@ -872,82 +1295,95 @@ def dashboard_summary(projekt_id: int = None, baustelle_id: int = None) -> dict:
 
 def dokument_hochladen(
     datei_pfad: str,
-    aufgabe_id: int | None = None,
-    material_id: int | None = None,
+    aufgabe_id: int = None,
+    material_id: int = None,
     doc_type: str = "beleg",
 ) -> dict:
     """
-    Lädt eine lokale Datei (Foto, PDF) als Dokument zu einer Aufgabe oder
-    Materialposition hoch.
+    Lädt ein Foto, einen Kassenbon oder eine Rechnung (JPG, PNG, WebP oder PDF,
+    max. 20 MB) ins Projekt hoch. Sobald Sven ein Foto/Beleg schickt, direkt
+    hochladen — auch ohne Buchung.
 
-    Erlaubte Dateitypen: .jpg, .jpeg, .png, .webp, .pdf (max. 20 MB).
-    Es muss genau eine Zuordnung angegeben werden: entweder aufgabe_id oder material_id.
+    Zuordnung (IDs aus projekt_uebersicht):
+      - Baustellenfoto / allgemeines Dokument → aufgabe_id
+      - Kassenbon/Rechnung zu einer Ausgabe   → material_id (erscheint in der
+        Weboberfläche beim Material; gern zusätzlich aufgabe_id mitgeben)
 
     Parameter:
-        datei_pfad  — Pflichtfeld: Absoluter oder relativer Pfad zur lokalen Datei auf dem Server
-                      (str), z. B. „/home/sven/fotos/rechnung.pdf".
-        aufgabe_id  — ID der Aufgabe, der das Dokument zugeordnet wird (int, optional).
-                      Entweder aufgabe_id oder material_id muss gesetzt sein.
-        material_id — ID der Materialposition, der das Dokument zugeordnet wird (int, optional).
-                      Entweder aufgabe_id oder material_id muss gesetzt sein.
-        doc_type    — Dokumenttyp: „rechnung", „beleg" (Standard) oder „foto".
+        datei_pfad  — Pflichtfeld: Pfad zur Datei auf dem Pi, z. B. ein Chat-Anhang unter
+                      /home/sven/.hermes/webui/attachments/<id>/… oder ~/.hermes/image_cache/….
+        aufgabe_id  — Aufgabe, zu der die Datei gehört.
+        material_id — Materialposition, zu der der Beleg gehört.
+        doc_type    — „foto", „beleg" (Kassenbon/Quittung, Standard) oder „rechnung".
 
-    Rückgabe: {"status": "ok", "id": <doc_id>, "filename": "...", "stored_name": "..."}
+    Rückgabe: {"status": "ok", "id": <dokument_id>, "filename": "...", "stored_name": "..."}
     """
-    if not os.path.isfile(datei_pfad):
-        return {"success": False, "error": f"Datei nicht gefunden: {datei_pfad}"}
+    pfad = os.path.expanduser(str(datei_pfad or "").strip())
+    if not os.path.isfile(pfad):
+        return _fehler(f"Datei nicht gefunden: {datei_pfad}")
     if aufgabe_id is None and material_id is None:
-        return {"success": False, "error": "aufgabe_id oder material_id muss angegeben werden."}
+        return _fehler("aufgabe_id oder material_id angeben (IDs aus projekt_uebersicht).")
+    endung = os.path.splitext(pfad)[1].lower()
+    if endung not in _ERLAUBTE_ENDUNGEN:
+        tipp = " iPhone-Fotos (HEIC) bitte als JPG schicken lassen." if endung in (".heic", ".heif") else ""
+        return _fehler(f"Dateityp {endung or '(ohne Endung)'} nicht erlaubt. Erlaubt: "
+                       f"{', '.join(sorted(_ERLAUBTE_ENDUNGEN))}.{tipp}")
+    if os.path.getsize(pfad) > _MAX_UPLOAD:
+        return _fehler(f"Datei ist größer als 20 MB ({os.path.getsize(pfad) // 1024 // 1024} MB).")
+    typ = _DOC_TYPEN.get(str(doc_type or "beleg").strip().lower())
+    if not typ:
+        return _fehler(f"doc_type {doc_type!r} unbekannt. Erlaubt: foto, beleg, rechnung.")
 
-    fields: dict = {"doc_type": doc_type}
+    fields: dict = {"doc_type": typ}
     if aufgabe_id is not None:
         fields["task_id"] = str(aufgabe_id)
     if material_id is not None:
         fields["material_id"] = str(material_id)
 
     try:
-        boundary, body = _multipart(fields, datei_pfad)
+        boundary, body = _multipart(fields, pfad)
     except OSError as exc:
-        return {"success": False, "error": f"Datei konnte nicht gelesen werden: {exc}"}
-
-    url = BASE_URL.rstrip("/") + "/api/documents"
-    headers = {"Content-Type": f"multipart/form-data; boundary={boundary}"}
-    req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+        return _fehler(f"Datei konnte nicht gelesen werden: {exc}")
     try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            raw = resp.read()
-            return json.loads(raw) if raw else {"status": "ok"}
-    except urllib.error.HTTPError as exc:
-        try:
-            detail = exc.read().decode("utf-8", errors="replace")
-            parsed = json.loads(detail)
-            msg = parsed.get("error", detail[:300])
-        except Exception:
-            msg = exc.reason or str(exc)
-        return {"success": False, "error": f"HTTP {exc.code}: {msg}"}
-    except urllib.error.URLError as exc:
-        return {"success": False, "error": f"baulog nicht erreichbar ({BASE_URL}): {exc.reason}"}
+        return _send("POST", "/api/documents", body,
+                     {"Content-Type": f"multipart/form-data; boundary={boundary}"})
+    except Exception as exc:  # noqa: BLE001
+        return _fehler(f"Unerwarteter Fehler: {exc}")
 
 
 def dokumente_liste(
-    aufgabe_id: int | None = None,
-    material_id: int | None = None,
-    baustelle_id: int | None = None,
-    doc_type: str | None = None,
+    projekt_id: int = None,
+    aufgabe_id: int = None,
+    material_id: int = None,
+    baustelle_id: int = None,
+    doc_type: str = None,
 ) -> dict:
     """
-    Gibt Dokumente zurück, filterbar nach Aufgabe, Materialposition, Baustelle oder Typ.
-
-    Alle Parameter sind optional und können kombiniert werden.
+    Gibt Dokumente zurück, filterbar nach Projekt, Aufgabe, Materialposition,
+    Baustelle oder Typ. Alle Parameter sind optional und kombinierbar.
 
     Parameter:
-        aufgabe_id   — Nur Dokumente dieser Aufgabe (int, optional).
-        material_id  — Nur Dokumente dieser Materialposition (int, optional).
-        baustelle_id — Nur Dokumente dieser Baustelle (int, optional; nützlich für Galerie).
-        doc_type     — Nur Dokumente dieses Typs: „rechnung", „beleg" oder „foto" (optional).
+        projekt_id   — Nur Dokumente dieses Projekts (Normalfall).
+        aufgabe_id   — Nur Dokumente dieser Aufgabe.
+        material_id  — Nur Dokumente dieser Materialposition.
+        baustelle_id — Nur Dokumente dieser Baustelle.
+        doc_type     — Nur „rechnung", „beleg" oder „foto".
 
     Rückgabe: {"status": "ok", "documents": [...]}
     """
+    if projekt_id is not None and baustelle_id is None:
+        sites = _get(f"/api/sites?project={projekt_id}")
+        if not _ok_antwort(sites):
+            return sites
+        alle: list[dict] = []
+        for s in sites.get("sites", []):
+            res = dokumente_liste(aufgabe_id=aufgabe_id, material_id=material_id,
+                                  baustelle_id=s["id"], doc_type=doc_type)
+            if not _ok_antwort(res):
+                return res
+            alle.extend(res.get("documents", []))
+        return {"status": "ok", "documents": alle}
+
     params: list[str] = []
     if aufgabe_id is not None:
         params.append(f"task_id={aufgabe_id}")
@@ -1044,6 +1480,9 @@ register_tool("baustelle_summary",    baustelle_summary)
 register_tool("projekt_summary",      projekt_summary)
 register_tool("gesamt_summary",       gesamt_summary)
 register_tool("dashboard_summary",    dashboard_summary)
+register_tool("projekt_uebersicht",   projekt_uebersicht)
+register_tool("person_bezahlt_markieren", person_bezahlt_markieren)
+register_tool("person_auszahlung",    person_auszahlung)
 
 # Dokumente & Fotos
 register_tool("dokument_hochladen",   dokument_hochladen)

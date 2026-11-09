@@ -218,6 +218,32 @@ def _flag_field(data: dict, key: str, *, default=1):
     return None, _err(f"'{key}' muss 0 oder 1 sein.")
 
 
+def _teilzahlung_normalisieren(fields: dict, betrag: float):
+    """
+    Teilzahlungen: 'paid_amount' (Euro) gilt nur, solange 'paid' = 0.
+
+    - paid wird gesetzt (ohne paid_amount)  → paid_amount = 0 (voll bezahlt bzw. wieder offen)
+    - paid_amount >= betrag                 → paid = 1, paid_amount = 0 (vollständig bezahlt)
+    - paid_amount <= 0                      → paid_amount = 0
+    Gibt eine Fehlerantwort oder None zurück; ändert 'fields' direkt.
+    """
+    if "paid_amount" in fields:
+        val, err = _num_field(fields, "paid_amount", default=0.0, minimum=0)
+        if err:
+            return err
+        val = round(val or 0.0, 2)
+        if val > 0 and fields.get("paid") == 1:
+            return _err("Teilzahlung und 'bezahlt' gleichzeitig ergibt keinen Sinn.")
+        if val > 0 and betrag > 0 and val >= round(betrag, 2):
+            fields["paid"], val = 1, 0.0
+        elif val > 0:
+            fields["paid"] = 0
+        fields["paid_amount"] = val
+    elif "paid" in fields:
+        fields["paid_amount"] = 0.0
+    return None
+
+
 def _date_field(data: dict, key: str):
     """
     Liest ein Datumsfeld (YYYY-MM-DD) mit Formatprüfung.
@@ -708,9 +734,9 @@ def api_task_get(task_id: int):
     time_entries = _rows(db.list_time_entries({"task_id": task_id}))
     materials = _rows(db.list_materials({"task_id": task_id}))
     documents = _rows(db.list_documents({"task_id": task_id}))
-    # Kosten je Eintrag ergänzen
+    # Kosten je Eintrag ergänzen (Zeiteinträge inkl. Anfahrt)
     for e in time_entries:
-        e["kosten"] = round(e["hours"] * e["hourly_rate"], 2)
+        e["kosten"] = round(e["hours"] * e["hourly_rate"] + e["travel_cost"], 2)
     for m in materials:
         m["kosten"] = round(m["qty"] * m["unit_price"], 2)
     mat_gesamt = sum(m["kosten"] for m in materials)
@@ -777,12 +803,12 @@ def api_task_delete(task_id: int):
 
 @app.route("/api/tasks/<int:task_id>/timeentries", methods=["GET"])
 def api_timeentries_list(task_id: int):
-    """Gibt alle Zeiteinträge einer Aufgabe zurück (mit berechneten Kosten)."""
+    """Gibt alle Zeiteinträge einer Aufgabe zurück (mit berechneten Kosten inkl. Anfahrt)."""
     if not db.get_task(task_id):
         return _err("Aufgabe nicht gefunden.", 404)
     entries = _rows(db.list_time_entries({"task_id": task_id}))
     for e in entries:
-        e["kosten"] = round(e["hours"] * e["hourly_rate"], 2)
+        e["kosten"] = round(e["hours"] * e["hourly_rate"] + e["travel_cost"], 2)
     return _ok(time_entries=entries)
 
 
@@ -791,11 +817,13 @@ def api_timeentries_create(task_id: int):
     """
     Legt einen Zeiteintrag (Personalkosten) an.
 
-    Body (JSON): { "person_id"?, "person"?, "hours", "hourly_rate"?, "billed"?, "work_date"? }
+    Body (JSON): { "person_id"?, "person"?, "hours", "hourly_rate"?, "billed"?, "work_date"?,
+                   "travel_cost"? }
     Entweder 'person_id' (Person muss existieren; setzt 'person'-Text und
     Standard-Stundensatz) oder 'person' (Freitext, dann ist 'hourly_rate' Pflicht).
     Pflichtfeld: hours (> 0).
     billed: 1 = mit Rechnung (Standard), 0 = ohne Rechnung.
+    travel_cost: Anfahrt in Euro für diesen Arbeitstag (>= 0, Standard 0).
     """
     if not db.get_task(task_id):
         return _err("Aufgabe nicht gefunden.", 404)
@@ -848,11 +876,22 @@ def api_timeentries_create(task_id: int):
     work_date, err = _date_field(data, "work_date")
     if err:
         return err
+    travel_cost, err = _num_field(data, "travel_cost", default=0.0, minimum=0)
+    if err:
+        return err
+    tz = {"paid": paid}
+    if "paid_amount" in data:
+        tz["paid_amount"] = data["paid_amount"]
+    err = _teilzahlung_normalisieren(tz, hours * rate + travel_cost)
+    if err:
+        return err
     eid = db.create_time_entry(
         task_id=task_id, person=person, person_id=person_id,
-        hours=hours, hourly_rate=rate, billed=billed, paid=paid,
-        work_date=work_date,
+        hours=hours, hourly_rate=rate, billed=billed, paid=tz["paid"],
+        work_date=work_date, travel_cost=travel_cost,
     )
+    if tz.get("paid_amount"):
+        db.update_time_entry(eid, {"paid_amount": tz["paid_amount"]})
     return _ok(id=eid), 201
 
 
@@ -862,15 +901,17 @@ def api_timeentry_update(eid: int):
     Aktualisiert Felder eines Zeiteintrags.
 
     Body (JSON): beliebige Kombination aus
-    { "person", "person_id", "hours", "hourly_rate", "billed", "work_date" }.
+    { "person", "person_id", "hours", "hourly_rate", "billed", "paid", "work_date",
+      "travel_cost" }.
     Gesetzte 'person_id' synchronisiert den 'person'-Text; 'person_id': null löst
-    die Verknüpfung (Text bleibt erhalten).
+    die Verknüpfung (Text bleibt erhalten). 'travel_cost': null setzt die Anfahrt auf 0.
     """
     if not db.get_time_entry(eid):
         return _err("Zeiteintrag nicht gefunden.", 404)
     data = request.get_json(silent=True) or {}
     fields = {k: data[k] for k in
-              ("person", "person_id", "hours", "hourly_rate", "billed", "paid", "work_date")
+              ("person", "person_id", "hours", "hourly_rate", "billed", "paid", "work_date",
+               "travel_cost", "paid_amount")
               if k in data}
     if not fields:
         return _err("Keine aktualisierbaren Felder angegeben.")
@@ -907,8 +948,44 @@ def api_timeentry_update(eid: int):
         fields["work_date"], err = _date_field(fields, "work_date")
         if err:
             return err
+    if "travel_cost" in fields:
+        fields["travel_cost"], err = _num_field(fields, "travel_cost", default=0.0, minimum=0)
+        if err:
+            return err
+    if "paid" in fields or "paid_amount" in fields:
+        alt = db.get_time_entry(eid)
+        neu_h = fields.get("hours", alt["hours"])
+        neu_r = fields.get("hourly_rate", alt["hourly_rate"])
+        neu_t = fields.get("travel_cost", alt["travel_cost"] or 0)
+        err = _teilzahlung_normalisieren(fields, neu_h * neu_r + neu_t)
+        if err:
+            return err
     db.update_time_entry(eid, fields)
     return _ok()
+
+
+@app.route("/api/projects/<int:pid>/payout", methods=["POST"])
+def api_project_payout(pid: int):
+    """
+    (Teil-)Auszahlung an eine Person verbuchen.
+
+    Body (JSON): { "person": "Robert", "amount": 200 }
+    Der Betrag wird auf die offenen Stunden-Einträge verteilt (älteste zuerst);
+    der letzte berührte Eintrag kann dabei teilweise bezahlt bleiben.
+    """
+    if not db.get_project(pid):
+        return _err("Projekt nicht gefunden.", 404)
+    data = request.get_json(silent=True) or {}
+    person, err = _str_field(data, "person", required=True)
+    if err:
+        return err
+    amount, err = _num_field(data, "amount", required=True, greater_than=0)
+    if err:
+        return err
+    res = db.person_auszahlung(pid, person, amount)
+    if "fehler" in res:
+        return _err(res["fehler"])
+    return _ok(**res)
 
 
 @app.route("/api/timeentries/<int:eid>", methods=["DELETE"])
@@ -964,6 +1041,12 @@ def api_materials_create(task_id: int):
     unit, err = _str_field(data, "unit")
     if err:
         return err
+    tz = {"paid": paid}
+    if "paid_amount" in data:
+        tz["paid_amount"] = data["paid_amount"]
+    err = _teilzahlung_normalisieren(tz, qty * unit_price)
+    if err:
+        return err
     mid = db.create_material(
         task_id=task_id,
         name=name,
@@ -971,8 +1054,10 @@ def api_materials_create(task_id: int):
         unit_price=unit_price,
         unit=unit,
         billed=billed,
-        paid=paid,
+        paid=tz["paid"],
     )
+    if tz.get("paid_amount"):
+        db.update_material(mid, {"paid_amount": tz["paid_amount"]})
     return _ok(id=mid), 201
 
 
@@ -986,7 +1071,8 @@ def api_material_update(mid: int):
     if not db.get_material(mid):
         return _err("Materialposition nicht gefunden.", 404)
     data = request.get_json(silent=True) or {}
-    fields = {k: data[k] for k in ("name", "qty", "unit", "unit_price", "billed", "paid") if k in data}
+    fields = {k: data[k] for k in ("name", "qty", "unit", "unit_price", "billed", "paid",
+                                              "paid_amount") if k in data}
     if not fields:
         return _err("Keine aktualisierbaren Felder angegeben.")
     if "billed" in fields:
@@ -1011,6 +1097,13 @@ def api_material_update(mid: int):
             return err
     if "unit_price" in fields:
         fields["unit_price"], err = _num_field(fields, "unit_price", required=True, minimum=0)
+        if err:
+            return err
+    if "paid" in fields or "paid_amount" in fields:
+        alt = db.get_material(mid)
+        neu_q = fields.get("qty", alt["qty"])
+        neu_p = fields.get("unit_price", alt["unit_price"])
+        err = _teilzahlung_normalisieren(fields, neu_q * neu_p)
         if err:
             return err
     db.update_material(mid, fields)

@@ -2,281 +2,349 @@
 <html lang="de">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Baulog · Hyper WorkWise</title>
   <style>
     :root { --ink:#1A1A1A; --grey:#5C5C5C; --line:#CFCFCB; --fill:#F4F4F2;
-            --green:#2E7D5B; --hellgruen:#8ECDB0; --red:#B23A3A; --amber:#B07D10; }
+            --green:#2E7D5B; --hellgruen:#8ECDB0; --red:#B23A3A; --amber:#B07D10;
+            --bg:#FAFAFA; }
     * { box-sizing: border-box; }
     html, body { overflow-x: hidden; }
     body { font-family: Arial, "Liberation Sans", sans-serif; color: var(--ink);
-           margin: 0; background: #fafafa; padding-bottom: 64px; }
-    @media (min-width:640px) { body { padding-bottom: 0; } }
+           margin: 0; background: var(--bg); }
+    body.mit-leiste { padding-bottom: 84px; }
+    @media (min-width:640px) { body.mit-leiste { padding-bottom: 0; } }
+
+    /* ---------- Kopfzeile ---------- */
     .topnav { background: var(--ink); color: #fff; position: sticky; top: 0; z-index: 40; }
-    .topnav-innen { max-width: 1100px; margin: 0 auto; padding: 10px 16px;
-                    display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
+    .topnav-innen { max-width: 1000px; margin: 0 auto; padding: 10px 16px;
+                    display: flex; gap: 18px; align-items: center; justify-content: space-between; }
     .marke { font-weight: bold; letter-spacing: 2px; font-size: 13px; color: #fff;
              text-decoration: none; }
     .marke span { color: var(--hellgruen); }
-    .tabs { display: none; gap: 14px; }
-    @media (min-width:640px) { .tabs { display: flex; } }
-    .tabs a { color: var(--line); text-decoration: none; font-size: 14px; padding: 4px 2px; }
-    .tabs a.aktiv, .tabs a:hover { color: #fff; }
-    main { max-width: 1100px; margin: 16px auto; padding: 0 12px; }
-    h1 { font-size: 22px; margin: 0 0 16px; }
-    h2 { font-size: 16px; margin: 20px 0 8px; }
-    .bottomnav { position: fixed; bottom: 0; left: 0; right: 0; background: var(--ink);
-                 display: flex; z-index: 40; }
-    @media (min-width:640px) { .bottomnav { display: none; } }
-    .bottomnav a { flex: 1; text-align: center; padding: 8px 2px 10px; min-height: 52px;
-                   font-size: 10px; color: var(--line); text-decoration: none;
-                   display: flex; flex-direction: column; justify-content: center; }
-    .bottomnav a.aktiv { color: #fff; font-weight: bold; }
-    .karten { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-              gap: 10px; margin-bottom: 16px; }
-    .karte { background: #fff; border: 1px solid var(--line); padding: 12px 14px; }
-    .karte .zahl { font-size: 20px; font-weight: bold; }
-    .karte .label { color: var(--grey); font-size: 12px; margin-top: 2px; }
-    .karte.ok .zahl { color: var(--green); }
-    .karte.warn .zahl { color: var(--red); }
-    .box { background: #fff; border: 1px solid var(--line); margin-bottom: 16px; }
-    .box-kopf { display: flex; align-items: center; justify-content: space-between; gap: 8px;
-                padding: 10px 12px; border-bottom: 1px solid var(--line);
-                font-weight: bold; font-size: 14px; }
-    .box-inhalt { padding: 12px; }
-    .box-pad { padding: 12px; }
-    .zeile { padding: 10px 0; border-bottom: 1px solid var(--fill); }
-    .zeile:last-child { border-bottom: none; }
+    .kopf-links { display: flex; gap: 16px; }
+    .kopf-links a { color: var(--line); text-decoration: none; font-size: 14px; padding: 6px 2px; }
+    .kopf-links a.aktiv, .kopf-links a:hover { color: #fff; }
+    main { max-width: 1000px; margin: 16px auto; padding: 0 16px; }
+    h1 { font-size: 24px; margin: 0; line-height: 1.2; overflow-wrap: anywhere; }
+    h2 { font-size: 16px; margin: 24px 0 8px; }
+
+    /* ---------- Bausteine ---------- */
+    .muted { color: var(--grey); font-size: 13px; }
+    .leer { text-align: center; color: var(--grey); padding: 36px 12px; font-size: 14px;
+            background: #fff; border: 1px dashed var(--line); }
+    .leer p { margin: 0 0 12px; }
+    .box { background: #fff; border: 1px solid var(--line); margin-bottom: 12px; }
     .seitenkopf { display: flex; align-items: center; justify-content: space-between;
-                  gap: 8px; margin-bottom: 12px; }
+                  gap: 8px; margin: 0 0 12px; flex-wrap: wrap; }
+    .spacer { flex: 1; }
+    .badge { display: inline-block; padding: 2px 8px; font-size: 11px; white-space: nowrap;
+             border: 1px solid var(--line); background: var(--fill); color: var(--grey); }
+    .badge.ohne { border-color: var(--red); color: var(--red); background: #fff; }
+    .badge.gewerk { background: #fff; }
+
+    button, .btn { font: inherit; font-size: 14px; padding: 8px 14px;
+                   border: 1px solid var(--ink); background: var(--ink); color: #fff;
+                   cursor: pointer; text-decoration: none; display: inline-flex;
+                   align-items: center; justify-content: center; gap: 6px; min-height: 44px; }
+    button:disabled { opacity: .5; cursor: default; }
+    .hell { background: #fff !important; color: var(--ink) !important; border-color: var(--line) !important; }
+    .rot { background: #fff !important; color: var(--red) !important; border-color: var(--red) !important; }
+    .rot-voll { background: var(--red) !important; border-color: var(--red) !important; color: #fff !important; }
+    .gruen { background: var(--green) !important; border-color: var(--green) !important; }
+    .klein { min-height: 34px !important; padding: 4px 10px !important; font-size: 13px !important; }
+    .linkbtn { background: none; border: none; padding: 0; min-height: 0; color: var(--green);
+               font-weight: bold; font-size: 13px; cursor: pointer; }
+    .linkbtn:hover { text-decoration: underline; }
+    .linkbtn.rot-link { color: var(--red); }
+
+    input, select, textarea { font: inherit; font-size: 16px; padding: 10px;
+                              border: 1px solid var(--line); width: 100%;
+                              background: #fff; min-height: 46px; color: var(--ink);
+                              border-radius: 0; }
+    input:focus, select:focus, textarea:focus { outline: 2px solid var(--green); outline-offset: -1px; }
+    textarea { min-height: 80px; resize: vertical; }
+    label { font-size: 13px; color: var(--grey); display: block; margin: 14px 0 4px; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
+    .grid3 { display: grid; grid-template-columns: 1fr 1fr 1.3fr; gap: 0 10px; }
+    @media (max-width:400px) { .grid2.umbruch { grid-template-columns: 1fr; } }
+    .unterfeld { background: var(--fill); padding: 10px; margin-top: 6px; }
+    .unterfeld input, .unterfeld select { margin-top: 0; }
+    .unterfeld > * + * { margin-top: 8px; }
+    .hidden { display: none !important; }
+
+    /* Umschalter (Mit/Ohne Rechnung, Offen/Bezahlt …) */
+    .seg { display: flex; border: 1px solid var(--line); background: #fff; }
+    .seg button { flex: 1; background: #fff; color: var(--grey); border: none; min-height: 44px;
+                  border-right: 1px solid var(--line); font-size: 14px; padding: 6px 8px; }
+    .seg button:last-child { border-right: none; }
+    .seg button.an { background: var(--ink); color: #fff; font-weight: bold; }
+
+    /* ---------- Projektliste ---------- */
+    .listenkopf { display: flex; align-items: flex-end; justify-content: space-between;
+                  gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+    .projekte { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+    .pkarte { display: block; background: #fff; border: 1px solid var(--line); padding: 16px;
+              color: inherit; text-decoration: none; border-left: 4px solid var(--green); }
+    .pkarte:hover { border-color: var(--ink); border-left-color: var(--green); }
+    .pk-name { font-size: 18px; font-weight: bold; margin-bottom: 4px; overflow-wrap: anywhere; }
+    .pk-notiz { color: var(--grey); font-size: 13px; margin-bottom: 12px; overflow-wrap: anywhere; }
+    .pk-zahlen { display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; color: var(--grey); }
+    .pk-zahlen b { display: block; font-size: 18px; color: var(--ink); }
+    .pk-oeffnen { margin-top: 12px; font-size: 13px; font-weight: bold; color: var(--green); }
+
+    /* ---------- Projektseite ---------- */
+    .zurueck { display: inline-block; color: var(--green); text-decoration: none; font-size: 14px;
+               font-weight: bold; margin-bottom: 10px; padding: 4px 0; }
+    .pkopf { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;
+             margin-bottom: 14px; }
+    .pkopf .muted { margin-top: 4px; }
+    .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(135px, 1fr));
+            gap: 8px; margin-bottom: 14px; }
+    .kpi { background: #fff; border: 1px solid var(--line); padding: 10px 12px; text-align: left;
+           color: inherit; font: inherit; }
+    .kpi .zahl { font-size: 19px; font-weight: bold; }
+    .kpi .label { color: var(--grey); font-size: 12px; margin-top: 2px; }
+    .kpi.warn .zahl { color: var(--amber); }
+    .kpi.haupt { border-color: var(--ink); }
+    button.kpi { display: block; min-height: 0; cursor: pointer; }
+    button.kpi:hover { border-color: var(--ink); }
+
+    .aktionsleiste { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+    .aktionsleiste button { font-weight: bold; }
+    @media (max-width:639px) {
+      .aktionsleiste { position: fixed; left: 0; right: 0; bottom: 0; z-index: 45; margin: 0;
+                       background: #fff; border-top: 1px solid var(--line); flex-wrap: nowrap;
+                       padding: 8px 8px calc(8px + env(safe-area-inset-bottom)); }
+      .aktionsleiste button { flex: 1; padding: 6px 4px; font-size: 13px; min-height: 52px;
+                              flex-direction: column; gap: 0; }
+      .aktionsleiste .nur-desktop { display: none; }
+    }
+    .aktionsleiste .plus { font-size: 18px; line-height: 1; }
+
+    .bereiche { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; align-items: center; }
+    .chip { background: #fff; color: var(--ink); border: 1px solid var(--line); min-height: 34px;
+            padding: 4px 12px; font-size: 13px; }
+    .chip.an { background: var(--ink); color: #fff; border-color: var(--ink); }
+
+    .ptabs { display: flex; border-bottom: 2px solid var(--line); margin-bottom: 14px;
+             overflow-x: auto; scrollbar-width: none; }
+    .ptabs::-webkit-scrollbar { display: none; }
+    .ptabs a { padding: 10px 14px; color: var(--grey); text-decoration: none; font-size: 14px;
+               white-space: nowrap; border-bottom: 3px solid transparent; margin-bottom: -2px; }
+    .ptabs a.aktiv { color: var(--ink); font-weight: bold; border-bottom-color: var(--green); }
+    .ptabs a span { font-size: 11px; background: var(--fill); padding: 1px 6px; margin-left: 4px;
+                    color: var(--grey); font-weight: normal; }
+
+    /* Logbuch */
+    .filter { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+              gap: 8px; margin-bottom: 14px; }
+    .filter select { min-height: 40px; font-size: 14px; padding: 7px; }
+    .tag { margin-bottom: 14px; }
+    .tag-kopf { display: flex; justify-content: space-between; font-size: 13px; font-weight: bold;
+                color: var(--grey); padding: 4px 2px 6px; }
+    .eintrag { display: flex; align-items: stretch; background: #fff; border: 1px solid var(--line);
+               margin-bottom: -1px; }
+    .e-haupt { flex: 1; display: flex; align-items: center; gap: 10px; background: #fff; color: var(--ink);
+               border: none; text-align: left; padding: 10px 12px; min-height: 58px; min-width: 0; }
+    .e-haupt:hover { background: var(--fill); }
+    .e-typ { flex: none; width: 34px; height: 34px; display: flex; align-items: center;
+             justify-content: center; font-size: 11px; font-weight: bold; border: 1px solid var(--line); }
+    .e-typ.zeit { background: #EAF4EF; color: var(--green); border-color: var(--hellgruen); }
+    .e-typ.material { background: #FBF3E3; color: var(--amber); border-color: #E3C98E; }
+    .e-text { flex: 1; min-width: 0; font-size: 14px; line-height: 1.35; }
+    .e-text b { overflow-wrap: anywhere; }
+    .e-text small { display: block; color: var(--grey); font-size: 12px; white-space: nowrap;
+                    overflow: hidden; text-overflow: ellipsis; }
+    .e-betrag { flex: none; font-weight: bold; font-size: 15px; white-space: nowrap; }
+    .zahlung { flex: none; width: 86px; border: none; border-left: 1px solid var(--line);
+               font-size: 12px; font-weight: bold; padding: 4px; min-height: 0;
+               flex-direction: column; gap: 2px; }
+    .zahlung.offen { background: #fff; color: var(--amber); }
+    .zahlung.bezahlt { background: #EAF4EF; color: var(--green); }
+    .zahlung.teil { background: #FFF6E0; color: var(--amber); }
+    @media (max-width:420px) { .zahlung { width: 72px; } .e-typ { display: none; } }
+    @media (max-width:639px) {
+      .kpis { grid-template-columns: 1fr 1fr; gap: 6px; }
+      .kpi { padding: 8px 10px; }
+      .kpi .zahl { font-size: 17px; }
+      .kpi.haupt { grid-column: 1 / -1; }
+    }
+
+    /* Aufgaben */
+    .aufgabe { background: #fff; border: 1px solid var(--line); padding: 12px; margin-bottom: 8px;
+               display: flex; gap: 12px; align-items: flex-start; }
+    .aufgabe.fertig { opacity: .7; }
+    .a-text { flex: 1; min-width: 0; }
+    .a-titel { font-weight: bold; font-size: 15px; overflow-wrap: anywhere; }
+    .a-meta { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0; align-items: center; }
+    .a-zahlen { font-size: 13px; color: var(--grey); }
+    .a-akt { display: flex; gap: 14px; margin-top: 8px; }
+    .status { min-height: 30px; padding: 2px 10px; font-size: 12px; font-weight: bold; border: 1px solid; }
+    .status.offen { background: #fff; color: var(--amber); border-color: var(--amber); }
+    .status.inarbeit { background: var(--amber); color: #fff; border-color: var(--amber); }
+    .status.fertig { background: #fff; color: var(--green); border-color: var(--green); }
+    .a-betrag { font-weight: bold; white-space: nowrap; }
+
+    /* Belege */
+    .galerie { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; }
+    .doc { background: #fff; border: 1px solid var(--line); display: flex; flex-direction: column; }
+    .doc-bild { display: flex; align-items: center; justify-content: center; height: 120px;
+                background: var(--fill); color: var(--grey); text-decoration: none; font-weight: bold;
+                overflow: hidden; }
+    .doc-bild img { width: 100%; height: 100%; object-fit: cover; }
+    .doc-info { padding: 8px 10px; font-size: 13px; display: flex; flex-direction: column; gap: 2px; flex: 1; }
+    .doc-name { font-weight: bold; overflow-wrap: anywhere; font-size: 13px; }
+    .doc-akt { display: flex; gap: 12px; margin-top: auto; padding-top: 6px; flex-wrap: wrap; }
+    .doc-akt a { color: var(--green); font-weight: bold; text-decoration: none; font-size: 13px; }
+
+    /* Auswertung */
     table { width: 100%; border-collapse: collapse; background: #fff; }
     th { background: #E7E7E3; text-align: left; font-size: 12px; padding: 8px 10px;
          border-bottom: 1px solid var(--line); }
-    td { padding: 8px 10px; border-bottom: 1px solid var(--line); font-size: 14px;
-         vertical-align: top; }
-    td.r, th.r { text-align: right; }
-    .badge { display: inline-block; padding: 2px 8px; font-size: 11px;
-             border: 1px solid var(--line); background: var(--fill); }
-    .badge.offen { border-color: var(--amber); color: var(--amber); background: #fff; }
-    .badge.inarbeit { border-color: var(--amber); color: #fff; background: var(--amber); }
-    .badge.fertig { border-color: var(--green); color: var(--green); background: #fff; }
-    .badge.aktiv { border-color: var(--green); color: var(--green); background: #fff; }
-    .badge.abgeschlossen { color: var(--grey); }
-    .badge.mit { border-color: var(--green); color: var(--green); background: #fff; }
-    .badge.ohne { border-color: var(--red); color: var(--red); background: #fff; }
-    button, .btn { font: inherit; font-size: 13px; padding: 6px 12px;
-                   border: 1px solid var(--ink); background: var(--ink); color: #fff;
-                   cursor: pointer; text-decoration: none; display: inline-flex;
-                   align-items: center; justify-content: center; min-height: 40px; }
-    @media (max-width:639px) { button, .btn { min-height: 44px; } }
-    .btn.hell, button.hell { background: #fff; color: var(--ink); border-color: var(--line); }
-    .btn.rot, button.rot { background: #fff; color: var(--red); border-color: var(--red); }
-    .btn.klein, button.klein { min-height: 32px; padding: 3px 9px; font-size: 12px; }
-    input, select, textarea { font: inherit; font-size: 14px; padding: 9px;
-                              border: 1px solid var(--line); width: 100%;
-                              background: #fff; min-height: 44px; }
-    textarea { min-height: 80px; }
-    label { font-size: 12px; color: var(--grey); display: block; margin: 10px 0 3px; }
-    .muted { color: var(--grey); font-size: 13px; }
-    .link { color: var(--green); text-decoration: none; font-weight: bold; }
-    .link:hover { text-decoration: underline; }
-    .btn-link { background: transparent; border: none; padding: 0; min-height: auto;
-                font: inherit; font-size: 13px; color: var(--green); text-decoration: none;
-                font-weight: bold; cursor: pointer; }
-    .btn-link:hover { text-decoration: underline; }
-    .leer { text-align: center; color: var(--grey); padding: 32px 0; font-size: 14px; }
-    .balken { background: var(--fill); height: 6px; }
+    td { padding: 9px 10px; border-bottom: 1px solid var(--line); font-size: 14px; vertical-align: top; }
+    td.r, th.r { text-align: right; white-space: nowrap; }
+    tr.summenzeile td { font-weight: bold; background: var(--fill); }
+    .scrollx { overflow-x: auto; border: 1px solid var(--line); }
+    .scrollx table { border: none; }
+    .balken { background: var(--fill); height: 6px; margin-top: 5px; }
     .balken > div { background: var(--green); height: 6px; }
-    .galerie { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-               gap: 10px; }
-    .thumb { width: 100%; height: 96px; object-fit: cover; border: 1px solid var(--line);
-             display: flex; align-items: center; justify-content: center;
-             font-size: 28px; background: var(--fill); }
-    .brotkrumen { font-size: 13px; color: var(--grey); margin-bottom: 12px;
-                  display: flex; flex-wrap: wrap; gap: 4px; }
-    .brotkrumen a { color: var(--green); text-decoration: none; }
-    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
-    @media (max-width:639px) { .grid2 { grid-template-columns: 1fr; } }
-    .aktionen { display: flex; gap: 8px; margin: 12px 0; flex-wrap: wrap; }
-    .nur-mobil { display: block; }
-    .nur-desktop { display: none; }
-    @media (min-width:640px) { .nur-mobil { display: none; } .nur-desktop { display: block; } }
-    .scrollx { overflow-x: auto; }
+
+    /* Personen */
+    .person { background: #fff; border: 1px solid var(--line); padding: 12px; margin-bottom: 8px;
+              display: flex; gap: 12px; align-items: center; }
+    .person.inaktiv { opacity: .6; }
+
+    /* ---------- Modal ---------- */
     #modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 50;
-                      display: flex; align-items: flex-end; justify-content: center;
-                      padding: 8px; }
+                      display: flex; align-items: flex-end; justify-content: center; }
     @media (min-width:640px) { #modal-backdrop { align-items: center; padding: 16px; } }
     #modal-backdrop.hidden { display: none; }
-    #modal-box { background: #fff; border: 1px solid var(--line); width: 100%;
-                 max-width: 560px; max-height: 90vh; overflow-y: auto;
-                 animation: slidein .15s ease-out; }
+    #modal-box { background: #fff; width: 100%; max-width: 560px; max-height: 92vh;
+                 display: flex; flex-direction: column; animation: hoch .15s ease-out; }
+    #modal-content { display: flex; flex-direction: column; min-height: 0; flex: 1; }
     .modal-kopf { display: flex; align-items: center; justify-content: space-between;
-                  padding: 12px; border-bottom: 1px solid var(--line); }
-    .modal-kopf h2 { margin: 0; font-size: 16px; }
-    #toast-container { position: fixed; bottom: 72px; left: 12px; right: 12px; z-index: 60;
+                  padding: 12px 16px; border-bottom: 1px solid var(--line); flex: none; }
+    .modal-kopf h2 { margin: 0; font-size: 17px; }
+    .modal-kopf button { background: none; border: none; color: var(--ink); font-size: 22px;
+                         min-height: 40px; width: 40px; padding: 0; }
+    .modal-body { padding: 4px 16px 16px; overflow-y: auto; flex: 1; }
+    .modal-fuss { display: flex; gap: 8px; padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+                  border-top: 1px solid var(--line); flex: none; flex-wrap: wrap; background: #fff; }
+    .modal-fuss button { min-width: 100px; }
+    .summe { margin-top: 14px; padding: 10px 12px; background: var(--fill); font-size: 15px;
+             display: flex; justify-content: space-between; }
+    .summe b { font-size: 17px; }
+    .fix { padding: 10px; background: var(--fill); font-size: 14px; }
+    .vorschlag { display: flex; align-items: flex-end; padding-bottom: 6px; }
+    .hinweis { font-size: 13px; color: var(--grey); margin: 8px 0 0; }
+    details.erweitert { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 10px; }
+    details.erweitert summary { cursor: pointer; font-size: 14px; font-weight: bold; padding: 6px 0; }
+    .bereich-zeile { display: flex; justify-content: space-between; align-items: center; gap: 8px;
+                     padding: 8px 0; border-bottom: 1px solid var(--fill); font-size: 14px; }
+
+    /* ---------- Toast ---------- */
+    #toast-container { position: fixed; bottom: 96px; left: 12px; right: 12px; z-index: 60;
                        display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
-    @media (min-width:640px) { #toast-container { bottom: 16px; left: auto; right: 16px;
-                                                  width: 320px; } }
-    .toast { pointer-events: auto; padding: 10px 14px; font-size: 14px; color: #fff;
-             background: var(--ink); animation: slidein .2s ease-out; }
+    @media (min-width:640px) { #toast-container { bottom: 16px; left: auto; right: 16px; width: 340px; } }
+    .toast { pointer-events: auto; padding: 12px 14px; font-size: 14px; color: #fff;
+             background: var(--ink); animation: hoch .2s ease-out; }
     .toast.success { background: var(--green); }
     .toast.error { background: var(--red); }
-    .hidden { display: none; }
-    @keyframes slidein { from { transform: translateY(100%); opacity: 0; }
-                         to { transform: translateY(0); opacity: 1; } }
+    @keyframes hoch { from { transform: translateY(30px); opacity: 0; } to { transform: none; opacity: 1; } }
   </style>
 </head>
 <body>
 
-<!-- ===== TOP BAR ===== -->
 <header class="topnav">
   <div class="topnav-innen">
     <a href="#/" class="marke"><span>∞</span> BAULOG</a>
-    <nav class="tabs">
-      <a href="#/" data-tab="dashboard">Dashboard</a>
-      <a href="#/projekte" data-tab="projekte">Projekte</a>
-      <a href="#/baustellen" data-tab="baustellen">Baustellen</a>
-      <a href="#/aufgaben" data-tab="aufgaben">Aufgaben</a>
-      <a href="#/personen" data-tab="personen">Personen</a>
-      <a href="#/dokumente" data-tab="dokumente">Dokumente</a>
+    <nav class="kopf-links">
+      <a href="#/" data-nav="projekte">Projekte</a>
+      <a href="#/personen" data-nav="personen">Personen</a>
     </nav>
   </div>
 </header>
 
-<!-- ===== HAUPTINHALT ===== -->
-<main id="app">
-  <div id="view" class="min-h">
-    <div class="leer">Wird geladen…</div>
-  </div>
+<main>
+  <div id="view"><div class="leer">Wird geladen…</div></div>
 </main>
 
-<!-- ===== BOTTOM NAV (Mobile) ===== -->
-<nav class="bottomnav">
-  <a href="#/" data-tab="dashboard">Start</a>
-  <a href="#/projekte" data-tab="projekte">Projekte</a>
-  <a href="#/baustellen" data-tab="baustellen">Baustellen</a>
-  <a href="#/aufgaben" data-tab="aufgaben">Aufgaben</a>
-  <a href="#/personen" data-tab="personen">Personen</a>
-  <a href="#/dokumente" data-tab="dokumente">Docs</a>
-</nav>
-
-<!-- ===== MODAL-OVERLAY ===== -->
 <div id="modal-backdrop" class="hidden">
-  <div id="modal-box"><div id="modal-content"></div></div>
+  <div id="modal-box" role="dialog" aria-modal="true"><div id="modal-content"></div></div>
 </div>
 
-<!-- ===== TOAST ===== -->
 <div id="toast-container"></div>
 
 <script>
 'use strict';
 
 // ============================================================
-// GLOBALER ZUSTAND
+// ZUSTAND
 // ============================================================
-const State = {
-  paperlessEnabled: false,
-  projects: [],
-  sites: [],
-};
+// App: globale Stammdaten. P: das aktuell geöffnete Projekt mit allen Einträgen.
+const App = { persons: [], paperless: false };
+let P = null;
 
-// View-lokale Daten-Caches (für Edit-Modals ohne String-Parameter)
-const ViewData = {};
+const ERLAUBTE_DATEIEN = '.jpg,.jpeg,.png,.webp,.pdf,image/jpeg,image/png,image/webp,application/pdf';
+const GEWERK_VORSCHLAEGE = ['Abbruch', 'Trockenbau', 'Elektro', 'Sanitär', 'Heizung', 'Maler',
+  'Fliesen', 'Boden', 'Fenster', 'Türen', 'Dach', 'Maurer', 'Putz', 'Reinigung'];
+const EINHEITEN = ['Stk', 'm', 'm²', 'm³', 'kg', 'l', 'Sack', 'Rolle', 'Paket', 'Pauschal', 'Anfahrt'];
 
 // ============================================================
-// UTILITIES
+// HILFSFUNKTIONEN
 // ============================================================
+const $ = (sel) => document.querySelector(sel);
+const EUR = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' });
+const WOCHENTAGE = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
 
-function formatEuro(val) {
-  const n = parseFloat(val) || 0;
-  return n.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '\u00a0€';
+function euro(v) { return EUR.format(Number(v) || 0); }
+function zahl(v) { return (Number(v) || 0).toLocaleString('de-DE', { maximumFractionDigits: 2 }); }
+function r2(v) { return Math.round((Number(v) || 0) * 100) / 100; }
+function zahlEin(v) { return v == null ? '' : String(v).replace('.', ','); }
+function anzahl(n, einzahl, mehrzahl) { return `${n} ${n === 1 ? einzahl : mehrzahl}`; }
+
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-// Menge/Stunden: deutsche Schreibweise, keine Float-Artefakte
-// (0.1 + 0.2 wurde sonst als "0.30000000000000004 h" angezeigt).
-function formatZahl(val) {
-  const n = parseFloat(val);
-  if (!isFinite(n)) return '0';
-  return n.toLocaleString('de-DE', { maximumFractionDigits: 2 });
+// "6,5" und "6.5" akzeptieren; "1.234,50" ebenfalls.
+function parseZahl(s) {
+  s = String(s ?? '').trim().replace(/\s/g, '').replace('€', '');
+  if (!s) return NaN;
+  if (s.includes(',')) s = s.replace(/\./g, '').replace(',', '.');
+  return Number(s);
 }
 
-// ISO-Datum (2026-08-20) als 20.08.2026 anzeigen; ungültige Werte unverändert.
-function formatDatum(val) {
-  if (!val) return '';
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(val));
-  return m ? `${m[3]}.${m[2]}.${m[1]}` : String(val);
+function isoDatum(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
-
-function esc(str) {
-  if (str == null) return '';
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
+function heute() { return isoDatum(new Date()); }
+// created_at ist UTC (ISO) — für die Anzeige in lokales Datum umrechnen
+function lokalesDatum(ts) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  return isNaN(d) ? String(ts).slice(0, 10) : isoDatum(d);
 }
-
-const IC = '';
-const SC = '';
-const BP = 'btn';
-const BS = 'btn hell';
-const BD = 'btn rot';
-
-function statusBadge(status) {
-  const map = { 'offen': 'offen', 'in Arbeit': 'inarbeit', 'fertig': 'fertig',
-                'aktiv': 'aktiv', 'abgeschlossen': 'abgeschlossen' };
-  return `<span class="badge ${map[status] || ''}">${esc(status)}</span>`;
+function datumKurz(iso) {
+  if (!iso) return '';
+  const [y, m, d] = iso.split('-');
+  return `${d}.${m}.${y}`;
 }
-
-function billedBadge(billed) {
-  return billed
-    ? `<span class="badge mit">mit Rechnung</span>`
-    : `<span class="badge ohne">ohne Rechnung</span>`;
-}
-
-function billedToggleHTML(currentBilled, fnName) {
-  const a = currentBilled === 1 ? 'btn' : 'btn hell';
-  const b = currentBilled === 0 ? 'btn' : 'btn hell';
-  return `<div style="display:inline-flex;">
-    <button type="button" onclick="${fnName}(1)" data-billed="1" class="${a}">mit Rechnung</button>
-    <button type="button" onclick="${fnName}(0)" data-billed="0" class="${b}">ohne Rechnung</button>
-  </div>`;
-}
-
-function updateBilledToggle(val) {
-  document.querySelectorAll('[data-billed]').forEach(b => {
-    b.className = parseInt(b.dataset.billed) === val ? 'btn' : 'btn hell';
-  });
-}
-
-function emptyState(text) {
-  return `<div class="leer">${esc(text)}</div>`;
-}
-
-function loadingSpinner() {
-  return `<div class="leer">Wird geladen…</div>`;
+function datumLang(iso) {
+  if (!iso) return 'Ohne Datum';
+  const g = new Date();
+  const gestern = new Date(g.getFullYear(), g.getMonth(), g.getDate() - 1);
+  if (iso === heute()) return 'Heute · ' + datumKurz(iso);
+  if (iso === isoDatum(gestern)) return 'Gestern · ' + datumKurz(iso);
+  const [y, m, d] = iso.split('-').map(Number);
+  return WOCHENTAGE[new Date(y, m - 1, d).getDay()] + ', ' + datumKurz(iso);
 }
 
 // ============================================================
-// TOAST
+// API
 // ============================================================
-
-function showToast(msg, type) {
-  const c = document.getElementById('toast-container');
-  const div = document.createElement('div');
-  div.className = `toast ${type || ''}`;
-  div.textContent = msg;
-  c.appendChild(div);
-  setTimeout(() => { if (div.parentNode) div.remove(); }, 4000);
-}
-
-function showError(msg) { showToast(msg, 'error'); }
-
-// ============================================================
-// API HELPER
-// ============================================================
-
 async function api(method, path, body) {
   const opts = { method, headers: {} };
   if (body !== undefined) {
@@ -285,1756 +353,1387 @@ async function api(method, path, body) {
   }
   let res;
   try { res = await fetch(path, opts); }
-  catch (e) { throw new Error('Netzwerkfehler: ' + e.message); }
+  catch (e) { throw new Error('Keine Verbindung zum Server: ' + e.message); }
   let json;
   try { json = await res.json(); } catch { json = {}; }
-  if (!res.ok || json.error) throw new Error(json.error || 'HTTP ' + res.status);
+  if (!res.ok || json.error) {
+    const err = new Error(json.error || 'Fehler ' + res.status);
+    err.status = res.status;
+    throw err;
+  }
   return json;
 }
 
-async function apiUpload(path, formData) {
+async function apiUpload(formData) {
   let res;
-  try { res = await fetch(path, { method: 'POST', body: formData }); }
-  catch (e) { throw new Error('Netzwerkfehler: ' + e.message); }
+  try { res = await fetch('/api/documents', { method: 'POST', body: formData }); }
+  catch (e) { throw new Error('Keine Verbindung zum Server: ' + e.message); }
   let json;
   try { json = await res.json(); } catch { json = {}; }
-  if (!res.ok || json.error) throw new Error(json.error || 'HTTP ' + res.status);
+  if (!res.ok || json.error) throw new Error(json.error || 'Fehler ' + res.status);
   return json;
 }
 
-// ============================================================
-// MODAL
-// ============================================================
+async function ladePersonen() {
+  const d = await api('GET', '/api/persons');
+  App.persons = d.persons;
+}
 
+// ============================================================
+// TOAST & MODAL
+// ============================================================
+function showToast(msg, typ) {
+  const el = document.createElement('div');
+  el.className = 'toast ' + (typ || '');
+  el.textContent = msg;
+  $('#toast-container').appendChild(el);
+  setTimeout(() => el.remove(), typ === 'error' ? 6000 : 2800);
+}
+function showError(msg) { showToast(msg, 'error'); }
+
+let modalGeaendert = false;
 function openModal(html) {
-  document.getElementById('modal-content').innerHTML = html;
-  const bd = document.getElementById('modal-backdrop');
-  bd.classList.remove('hidden');
+  $('#modal-content').innerHTML = html;
+  $('#modal-backdrop').classList.remove('hidden');
+  modalGeaendert = false;
+  const f = $('#modal-content [autofocus]');
+  if (f && window.matchMedia('(min-width:640px)').matches) f.focus();
 }
-
 function closeModal() {
-  document.getElementById('modal-backdrop').classList.add('hidden');
-  document.getElementById('modal-content').innerHTML = '';
+  $('#modal-backdrop').classList.add('hidden');
+  $('#modal-content').innerHTML = '';
 }
-
-document.getElementById('modal-backdrop').addEventListener('click', function(e) {
-  if (e.target === this) closeModal();
+function modalKopf(titel) {
+  return `<div class="modal-kopf"><h2>${esc(titel)}</h2>
+    <button type="button" onclick="closeModal()" aria-label="Schließen">✕</button></div>`;
+}
+$('#modal-backdrop').addEventListener('click', ev => {
+  // Klick daneben schließt nur, solange noch nichts eingegeben wurde
+  if (ev.target.id === 'modal-backdrop' && !modalGeaendert) closeModal();
+});
+$('#modal-content').addEventListener('input', () => { modalGeaendert = true; });
+document.addEventListener('keydown', ev => {
+  if (ev.key === 'Escape' && !$('#modal-backdrop').classList.contains('hidden')) closeModal();
 });
 
-function modalHeader(title) {
-  return `<div class="modal-kopf"><h2>${esc(title)}</h2>
-    <button type="button" onclick="closeModal()" class="btn hell klein" aria-label="Schließen">✕</button></div>`;
+// Sperrt die Modal-Knöpfe während einer Speicher-Aktion; Fehler landen als Toast.
+async function mitSperre(fn) {
+  const knoepfe = [...document.querySelectorAll('#modal-box button')];
+  knoepfe.forEach(b => b.disabled = true);
+  try { await fn(); }
+  catch (e) { showError(e.message); }
+  finally { knoepfe.forEach(b => b.disabled = false); }
 }
 
-function formRow(label, inputHTML) {
-  return `<div><label>${label}</label>${inputHTML}</div>`;
+function bestaetigen(titel, htmlText, knopf, aktion) {
+  openModal(`${modalKopf(titel)}
+    <div class="modal-body"><p>${htmlText}</p></div>
+    <div class="modal-fuss"><button class="hell" onclick="closeModal()">Abbrechen</button>
+      <span class="spacer"></span><button class="rot-voll" id="m-ja">${esc(knopf)}</button></div>`);
+  $('#m-ja').onclick = () => mitSperre(aktion);
+}
+
+// Umschalter: <div class="seg" data-seg="name"> mit Buttons data-v
+function seg(name, wert, optionen) {
+  return `<div class="seg" data-seg="${name}">${optionen.map(([v, l]) =>
+    `<button type="button" data-v="${esc(v)}" class="${String(v) === String(wert) ? 'an' : ''}">${esc(l)}</button>`
+  ).join('')}</div>`;
+}
+function segWert(name) {
+  const b = document.querySelector(`.seg[data-seg="${name}"] button.an`);
+  if (!b) return null;
+  const v = b.dataset.v;
+  return /^\d+$/.test(v) ? Number(v) : v;
+}
+document.addEventListener('click', ev => {
+  const b = ev.target.closest('.seg button');
+  if (!b) return;
+  b.parentElement.querySelectorAll('button').forEach(x => x.classList.toggle('an', x === b));
+  modalGeaendert = true;
+});
+
+// Zahlungsstatus im Formular: Offen / Teilweise (mit Betrag) / Bezahlt
+function zahlungsFeld(eintrag) {
+  const teil = eintrag && !eintrag.paid && eintrag.paid_amount > 0;
+  const wert = eintrag && eintrag.paid ? 1 : (teil ? 2 : 0);
+  return `<label>Schon bezahlt?</label>${seg('paid', wert, [[0, 'Noch offen'], [2, 'Teilweise'], [1, 'Bezahlt']])}
+    <div id="f-teil-box" class="unterfeld ${teil ? '' : 'hidden'}">
+      <label for="f-teil" style="margin-top:0">Davon schon gezahlt (€)</label>
+      <input id="f-teil" inputmode="decimal" placeholder="z. B. 50" value="${teil ? zahlEin(eintrag.paid_amount) : ''}">
+    </div>`;
+}
+function zahlungWerte() {
+  const w = segWert('paid');
+  if (w === 2) {
+    const v = parseZahl($('#f-teil').value);
+    if (!(v > 0)) throw new Error('Bitte den bereits gezahlten Betrag eintragen (mehr als 0).');
+    return { paid: 0, paid_amount: v };
+  }
+  return { paid: w === 1 ? 1 : 0, paid_amount: 0 };
+}
+document.addEventListener('click', ev => {
+  if (!ev.target.closest('.seg[data-seg="paid"] button')) return;
+  const box = $('#f-teil-box');
+  if (box) box.classList.toggle('hidden', segWert('paid') !== 2);
+});
+
+// Zuletzt gewählte Aufgabe/Person je Projekt merken (nur Komfort)
+function gemerkt() {
+  try { return JSON.parse(localStorage.getItem('baulog.zuletzt.' + P.pid)) || {}; }
+  catch { return {}; }
+}
+function merke(obj) {
+  try { localStorage.setItem('baulog.zuletzt.' + P.pid, JSON.stringify({ ...gemerkt(), ...obj })); }
+  catch { /* ohne Speicher geht es auch */ }
 }
 
 // ============================================================
-// ROUTER
+// ROUTING
 // ============================================================
+// #/              → Projektliste
+// #/p/<id>/<tab>  → Projekt (tab: logbuch | aufgaben | belege | auswertung)
+// #/personen      → Personen
+async function route() {
+  const teile = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean);
+  closeModal();
+  document.querySelectorAll('.kopf-links a').forEach(a =>
+    a.classList.toggle('aktiv', a.dataset.nav === (teile[0] === 'personen' ? 'personen' : 'projekte')));
+  try {
+    if (teile[0] === 'p' && /^\d+$/.test(teile[1])) return await zeigeProjekt(Number(teile[1]), teile[2] || 'logbuch');
+    // Alte Links (#/projekte/5) weiterhin auflösen
+    if (teile[0] === 'projekte' && /^\d+$/.test(teile[1])) return location.replace('#/p/' + teile[1]);
+    if (teile[0] === 'personen') return await zeigePersonen();
+    return await zeigeProjekte();
+  } catch (e) {
+    $('#view').innerHTML = `<div class="leer"><p>${esc(e.message)}</p>
+      <button onclick="route()">Erneut versuchen</button> <a class="btn hell" href="#/">Zur Projektliste</a></div>`;
+  }
+}
+window.addEventListener('hashchange', route);
 
-function navigate(hash) { window.location.hash = hash; }
+// ============================================================
+// PROJEKTLISTE
+// ============================================================
+async function zeigeProjekte() {
+  P = null;
+  document.body.classList.remove('mit-leiste');
+  $('#view').innerHTML = '<div class="leer">Wird geladen…</div>';
+  const [pd, sd] = await Promise.all([api('GET', '/api/projects'), api('GET', '/api/sites')]);
+  const offen = {};
+  sd.sites.forEach(s => { offen[s.project_id] = (offen[s.project_id] || 0) + (s.open_task_count || 0); });
+  const projekte = pd.projects;
+  const summe = r2(projekte.reduce((a, p) => a + (p.total_cost || 0), 0));
 
-function currentTab() {
-  const h = window.location.hash || '#/';
-  if (h === '#/' || h === '#' || h === '') return 'dashboard';
-  if (h.startsWith('#/projekte') || h.startsWith('#/projekt/')) return 'projekte';
-  if (h.startsWith('#/baustellen') || h.startsWith('#/baustelle/')) return 'baustellen';
-  if (h.startsWith('#/aufgaben') || h.startsWith('#/aufgabe/')) return 'aufgaben';
-  if (h.startsWith('#/personen')) return 'personen';
-  if (h.startsWith('#/dokumente')) return 'dokumente';
-  return '';
+  $('#view').innerHTML = `
+    <div class="listenkopf">
+      <div><h1>Projekte</h1>
+        <div class="muted">${projekte.length} ${projekte.length === 1 ? 'Projekt' : 'Projekte'} · ${euro(summe)} Kosten gesamt</div></div>
+      <button onclick="formProjektNeu()"><span class="plus">+</span> Neues Projekt</button>
+    </div>
+    ${projekte.length ? `<div class="projekte">${projekte.map(p => `
+      <a class="pkarte" href="#/p/${p.id}">
+        <div class="pk-name">${esc(p.name)}</div>
+        ${p.note && p.note !== p.name ? `<div class="pk-notiz">${esc(p.note)}</div>` : '<div class="pk-notiz">&nbsp;</div>'}
+        <div class="pk-zahlen">
+          <div><b>${euro(p.total_cost)}</b>Kosten</div>
+          <div><b>${offen[p.id] || 0}</b>offene Aufgaben</div>
+        </div>
+        <div class="pk-oeffnen">Öffnen →</div>
+      </a>`).join('')}</div>`
+    : `<div class="leer"><p>Noch kein Projekt angelegt.</p>
+        <button onclick="formProjektNeu()">+ Erstes Projekt anlegen</button></div>`}`;
 }
 
-function updateNavHighlight() {
-  const tab = currentTab();
-  document.querySelectorAll('.tabs a, .bottomnav a').forEach(el => {
-    el.classList.toggle('aktiv', el.dataset.tab === tab);
+function formProjektNeu() {
+  openModal(`${modalKopf('Neues Projekt')}
+    <div class="modal-body">
+      <label for="f-name">Projektname</label>
+      <input id="f-name" placeholder="z. B. Dachbodenausbau, Bad EG …" autofocus>
+      <label for="f-notiz">Beschreibung (optional)</label>
+      <textarea id="f-notiz" placeholder="Worum geht es?"></textarea>
+      <label for="f-adresse">Adresse (optional)</label>
+      <input id="f-adresse" placeholder="Straße, Ort">
+    </div>
+    <div class="modal-fuss"><button class="hell" onclick="closeModal()">Abbrechen</button>
+      <span class="spacer"></span><button onclick="speichereProjektNeu()">Projekt anlegen</button></div>`);
+}
+
+function speichereProjektNeu() {
+  return mitSperre(async () => {
+    const name = $('#f-name').value.trim();
+    if (!name) throw new Error('Bitte einen Projektnamen eingeben.');
+    const note = $('#f-notiz').value.trim() || null;
+    const address = $('#f-adresse').value.trim() || null;
+    const r = await api('POST', '/api/projects', { name, note });
+    // Jedes Projekt bekommt im Hintergrund genau eine Baustelle — darunter hängen die Aufgaben.
+    await api('POST', '/api/sites', { project_id: r.id, name, address });
+    closeModal();
+    showToast('Projekt angelegt', 'success');
+    location.hash = '#/p/' + r.id;
   });
 }
 
-async function render() {
-  updateNavHighlight();
-  closeModal();
-  const hash = window.location.hash || '#/';
-  const view = document.getElementById('view');
-  // Query-Teil (?project=1) vor dem Zerlegen abtrennen — sonst landet er im
-  // letzten Pfadsegment und KEIN Filter-Link findet seine Route.
-  // Die Views lesen die Query selbst aus window.location.hash.
-  const noHash = hash.replace(/^#/, '').split('?')[0];
-  const parts = noHash.split('/').filter(Boolean);
-
-  try {
-    if (!parts.length || (parts.length === 1 && parts[0] === '')) {
-      await renderDashboard();
-    } else if (parts[0] === 'projekte' && parts.length === 1) {
-      await renderProjekte();
-    } else if (parts[0] === 'projekt' && parts[1]) {
-      await renderProjektDetail(parseInt(parts[1]));
-    } else if (parts[0] === 'baustellen' && parts.length === 1) {
-      await renderBaustellen();
-    } else if (parts[0] === 'baustelle' && parts[1] && parts[2] === 'aufgaben') {
-      await renderAufgaben(parseInt(parts[1]));
-    } else if (parts[0] === 'baustelle' && parts[1] && parts[2] === 'dokumente') {
-      await renderDokumente(parseInt(parts[1]));
-    } else if (parts[0] === 'baustelle' && parts[1] && parts.length === 2) {
-      await renderBaustelleDetail(parseInt(parts[1]));
-    } else if (parts[0] === 'aufgabe' && parts[1]) {
-      await renderAufgabeDetail(parseInt(parts[1]));
-    } else if (parts[0] === 'aufgaben') {
-      await renderAufgabenGesamt();
-    } else if (parts[0] === 'dokumente') {
-      await renderDokumenteGesamt();
-    } else if (parts[0] === 'personen') {
-      await renderPersonen();
-    } else {
-      view.innerHTML = `<p class="leer">Seite nicht gefunden.</p>`;
-    }
-  } catch (e) {
-    view.innerHTML = `<div class="box box-pad" style="border-color:var(--red); color:var(--red);">
-      <strong>Fehler:</strong> ${esc(e.message)}</div>`;
-  }
-}
-
 // ============================================================
-// HELPERS: Layout-Bausteine
+// PROJEKT LADEN
 // ============================================================
-
-function breadcrumb(items) {
-  return `<nav class="brotkrumen">
-    ${items.map((item, i) => i < items.length - 1
-      ? `<a href="${esc(item.href)}">${esc(item.label)}</a><span>›</span>`
-      : `<span>${esc(item.label)}</span>`
-    ).join('')}
-  </nav>`;
-}
-
-function costGrid(summary) {
-  const s = summary || {};
-  function tile(label, mit, ohne) {
-    return `<div class="karte">
-      <div class="label">${label}</div>
-      <div class="zahl">${formatEuro((mit || 0) + (ohne || 0))}</div>
-      <div class="muted">mit Rechnung: <b style="color:var(--green)">${formatEuro(mit || 0)}</b></div>
-      <div class="muted">ohne Rechnung: <b style="color:var(--red)">${formatEuro(ohne || 0)}</b></div>
-    </div>`;
-  }
-  return `<div class="karten">
-    ${tile('Material', s.mat_mit, s.mat_ohne)}
-    ${tile('Personal', s.pers_mit, s.pers_ohne)}
-    ${tile('Gesamtkosten', (s.mat_mit || 0) + (s.pers_mit || 0), (s.mat_ohne || 0) + (s.pers_ohne || 0))}
-  </div>`;
-}
-
-function tradeBreakdown(byTrade) {
-  if (!byTrade || !byTrade.length) return '';
-  const total = byTrade.reduce((s, t) => s + (t.gesamt || 0), 0);
-  return `<div class="box"><div class="box-kopf">Aufschlüsselung nach Gewerk</div>
-    <div class="box-inhalt">
-    ${byTrade.map(t => {
-      const pct = total > 0 ? Math.round((t.gesamt || 0) / total * 100) : 0;
-      return `<div style="margin-bottom:10px;">
-        <div style="display:flex; justify-content:space-between; font-size:14px; margin-bottom:3px;">
-          <span>${esc(t.trade_name || '(kein Gewerk)')}</span><span>${formatEuro(t.gesamt || 0)}</span>
-        </div>
-        <div class="balken"><div style="width:${pct}%"></div></div>
-      </div>`;
-    }).join('')}
-  </div></div>`;
-}
-
-// ============================================================
-// VIEW: DASHBOARD (#/)
-// ============================================================
-
-async function renderDashboard() {
-  const view = document.getElementById('view');
-  view.innerHTML = loadingSpinner();
-
-  const hash = window.location.hash;
-  const qs = hash.includes('?') ? hash.split('?')[1] : '';
-  const urlParams = new URLSearchParams(qs);
-  const selPid = urlParams.get('pid') ? parseInt(urlParams.get('pid')) : null;
-  const selSid = urlParams.get('sid') ? parseInt(urlParams.get('sid')) : null;
-
-  let apiPath = '/api/dashboard';
-  const qp = [];
-  if (selPid) qp.push('project=' + selPid);
-  if (selSid) qp.push('site=' + selSid);
-  if (qp.length) apiPath += '?' + qp.join('&');
-
-  const [dashData, projData, sitesData] = await Promise.all([
-    api('GET', apiPath),
-    api('GET', '/api/projects'),
-    api('GET', '/api/sites'),
+async function ladeProjekt(pid) {
+  const vorher = (P && P.pid === pid) ? P : null;
+  const pd = await api('GET', `/api/projects/${pid}`);
+  const sites = pd.sites.slice().sort((a, b) => (a.created_at < b.created_at ? -1 : 1));
+  const [siteDetails, taskListen, docListen] = await Promise.all([
+    Promise.all(sites.map(s => api('GET', `/api/sites/${s.id}`))),
+    Promise.all(sites.map(s => api('GET', `/api/sites/${s.id}/tasks`))),
+    Promise.all(sites.map(s => api('GET', `/api/documents?site_id=${s.id}`))),
   ]);
-  const d = dashData.dashboard;
-  State.projects = projData.projects || [];
-  State.sites = sitesData.sites || [];
-  const filteredSites = selPid ? State.sites.filter(s => s.project_id === selPid) : State.sites;
-
-  const projOpts = ['<option value="">Alle Projekte</option>',
-    ...State.projects.map(p => `<option value="${p.id}" ${selPid === p.id ? 'selected' : ''}>${esc(p.name)}</option>`)
-  ].join('');
-  const siteOpts = ['<option value="">Alle Baustellen</option>',
-    ...filteredSites.map(s => `<option value="${s.id}" ${selSid === s.id ? 'selected' : ''}>${esc(s.name)}</option>`)
-  ].join('');
-
-  const k = d.kpis || {};
-
-  const kpiKarten = `<div class="karten">
-    <div class="karte"><div class="label">Gesamtkosten</div>
-      <div class="zahl">${formatEuro(k.gesamt)}</div></div>
-    <div class="karte ok"><div class="label">mit Rechnung</div>
-      <div class="zahl">${formatEuro(k.gesamt_mit)}</div></div>
-    <div class="karte warn"><div class="label">ohne Rechnung</div>
-      <div class="zahl">${formatEuro(k.gesamt_ohne)}</div></div>
-    <div class="karte"><div class="label">Offene Aufgaben</div>
-      <div class="zahl">${k.offene_aufgaben || 0}</div></div>
-    <div class="karte"><div class="label">Aktive Baustellen</div>
-      <div class="zahl">${k.aktive_baustellen || 0}</div></div>
-  </div>`;
-
-  const siteMax = Math.max(1, ...(d.by_site || []).map(s => s.gesamt || 0));
-  const siteBars = (d.by_site || []).length === 0 ? '' :
-    `<div class="box"><div class="box-kopf">Kosten je Baustelle</div><div class="box-inhalt">
-      ${d.by_site.map(s => `<div style="margin-bottom:10px;">
-        <div style="display:flex; justify-content:space-between; font-size:14px; margin-bottom:3px;">
-          <a class="link" href="#/baustelle/${s.site_id}">${esc(s.site_name)}</a>
-          <span>${formatEuro(s.gesamt)} · ${s.offene_aufgaben} offen</span>
-        </div>
-        <div class="balken"><div style="width:${Math.round((s.gesamt || 0) / siteMax * 100)}%"></div></div>
-      </div>`).join('')}
-    </div></div>`;
-
-  const personTabelle = (d.by_person || []).length === 0 ? '' :
-    `<div class="box"><div class="box-kopf">Stunden &amp; Kosten je Person</div>
-      <div class="scrollx"><table>
-        <thead><tr><th>Person</th><th class="r">Stunden</th><th class="r">mit Rechnung</th>
-          <th class="r">ohne Rechnung</th><th class="r">Gesamt</th></tr></thead>
-        <tbody>${d.by_person.map(p => `<tr>
-          <td>${esc(p.person_name)}</td>
-          <td class="r">${formatZahl(p.stunden)} h</td>
-          <td class="r">${formatEuro(p.kosten_mit)}</td>
-          <td class="r">${formatEuro(p.kosten_ohne)}</td>
-          <td class="r"><b>${formatEuro(p.kosten)}</b></td>
-        </tr>`).join('')}</tbody>
-      </table></div></div>`;
-
-  const typLabel = { zeit: 'Zeit', material: 'Material', dokument: 'Dokument' };
-  const recentListe = (d.recent || []).length === 0 ? '' :
-    `<div class="box"><div class="box-kopf">Zuletzt erfasst</div><div class="box-inhalt">
-      ${d.recent.map(r => `<div class="zeile" style="display:flex; justify-content:space-between; gap:8px;">
-        <div>
-          <span class="badge">${typLabel[r.typ] || esc(r.typ)}</span>
-          ${esc(r.label)}
-          <a class="link" href="#/aufgabe/${r.task_id}">${esc(r.task_title)}</a>
-        </div>
-        <div style="white-space:nowrap;">${r.betrag != null ? formatEuro(r.betrag) : ''}</div>
-      </div>`).join('')}
-    </div></div>`;
-
-  view.innerHTML = `
-    <h1>Dashboard</h1>
-    <div class="box box-pad">
-      <div class="grid2">
-        <div>
-          <label>Projekt</label>
-          <select id="dash-pid" onchange="dashFilter()">${projOpts}</select>
-        </div>
-        <div>
-          <label>Baustelle</label>
-          <select id="dash-sid" onchange="dashFilter()">${siteOpts}</select>
-        </div>
-      </div>
-    </div>
-    ${kpiKarten}
-    ${tradeBreakdown(d.by_trade || [])}
-    ${siteBars}
-    ${personTabelle}
-    ${recentListe}`;
-}
-
-window.dashFilter = function() {
-  const pid = document.getElementById('dash-pid').value;
-  const sid = document.getElementById('dash-sid').value;
-  const params = [];
-  if (pid) params.push('pid=' + pid);
-  if (sid) params.push('sid=' + sid);
-  window.location.hash = '#/' + (params.length ? '?' + params.join('&') : '');
-};
-
-// ============================================================
-// VIEW: PROJEKTE (#/projekte)
-// ============================================================
-
-async function renderProjekte() {
-  const view = document.getElementById('view');
-  view.innerHTML = loadingSpinner();
-  const data = await api('GET', '/api/projects');
-  const projects = data.projects || [];
-  State.projects = projects;
-
-  const cards = projects.map(p => `
-    <div class="zeile">
-      <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:8px;">
-        <div>
-          <a href="#/projekt/${p.id}" class="link">${esc(p.name)}</a>
-          ${p.note ? `<p class="muted">${esc(p.note)}</p>` : ''}
-          <p class="muted">${p.site_count != null ? p.site_count : 0} Baustelle(n) · ${formatEuro(p.total_cost)}</p>
-        </div>
-        <div style="display:flex; gap:8px; flex-shrink:0;">
-          <button onclick="openEditProjektModal(${p.id})" class="${BS} klein" aria-label="Bearbeiten">✏️</button>
-          <button onclick="deleteProjekt(${p.id})" class="${BD} klein" aria-label="Löschen">🗑</button>
-        </div>
-      </div>
-    </div>`).join('');
-
-  const tableRows = projects.map(p => `
-    <tr>
-      <td><a href="#/projekt/${p.id}" class="link">${esc(p.name)}</a>
-        ${p.note ? `<p class="muted">${esc(p.note)}</p>` : ''}</td>
-      <td>${p.site_count != null ? p.site_count : 0}</td>
-      <td>${formatEuro(p.total_cost)}</td>
-      <td>
-        <div style="display:flex; gap:8px; justify-content:flex-end;">
-          <button onclick="openEditProjektModal(${p.id})" class="${BS} klein">✏️</button>
-          <button onclick="deleteProjekt(${p.id})" class="${BD} klein">🗑</button>
-        </div>
-      </td>
-    </tr>`).join('');
-
-  const inner = projects.length === 0 ? emptyState('Noch keine Projekte angelegt.') : `
-    <div class="nur-mobil box-inhalt">${cards}</div>
-    <div class="nur-desktop scrollx">
-      <table>
-        <thead>
-          <tr><th>Name</th><th>Baustellen</th><th>Gesamtkosten</th><th></th></tr>
-        </thead>
-        <tbody>${tableRows}</tbody>
-      </table>
-    </div>`;
-
-  view.innerHTML = `
-    <div class="seitenkopf">
-      <h1>Projekte</h1>
-      <button onclick="openNeuProjektModal()" class="${BP}">+ Neues Projekt</button>
-    </div>
-    <div class="box">${inner}</div>`;
-}
-
-window.openNeuProjektModal = function() {
-  openModal(`${modalHeader('Neues Projekt')}
-    <form onsubmit="submitNeuProjekt(event)" class="box-inhalt">
-      ${formRow('Name *', `<input id="mf-pn-name" required placeholder="z.B. Umbau MFH Deisterstraße 40">`)}
-      ${formRow('Notiz', `<textarea id="mf-pn-note" class="" rows="2" placeholder="Optional"></textarea>`)}
-      <div class="aktionen">
-        <button type="submit" class="${BP}">Speichern</button>
-        <button type="button" onclick="closeModal()" class="${BS}">Abbrechen</button>
-      </div>
-    </form>`);
-};
-
-window.submitNeuProjekt = async function(e) {
-  e.preventDefault();
-  try {
-    await api('POST', '/api/projects', {
-      name: document.getElementById('mf-pn-name').value.trim(),
-      note: document.getElementById('mf-pn-note').value.trim() || null,
-    });
-    showToast('Projekt angelegt.', 'success');
-    closeModal();
-    await renderProjekte();
-  } catch(err) { showError(err.message); }
-};
-
-window.openEditProjektModal = async function(pid) {
-  let p = State.projects.find(x => x.id === pid);
-  if (!p) {
-    const d = await api('GET', '/api/projects/' + pid);
-    p = d.project;
-  }
-  openModal(`${modalHeader('Projekt bearbeiten')}
-    <form onsubmit="submitEditProjekt(event,${pid})" class="box-inhalt">
-      ${formRow('Name *', `<input id="mf-pe-name" required value="${esc(p.name)}">`)}
-      ${formRow('Notiz', `<textarea id="mf-pe-note" rows="2">${esc(p.note || '')}</textarea>`)}
-      <div class="aktionen">
-        <button type="submit" class="${BP}">Speichern</button>
-        <button type="button" onclick="closeModal()" class="${BS}">Abbrechen</button>
-      </div>
-    </form>`);
-};
-
-window.submitEditProjekt = async function(e, pid) {
-  e.preventDefault();
-  try {
-    await api('PUT', '/api/projects/' + pid, {
-      name: document.getElementById('mf-pe-name').value.trim(),
-      note: document.getElementById('mf-pe-note').value.trim() || null,
-    });
-    showToast('Projekt aktualisiert.', 'success');
-    closeModal();
-    await renderProjekte();
-  } catch(err) { showError(err.message); }
-};
-
-window.deleteProjekt = async function(pid) {
-  if (!confirm('Projekt wirklich löschen? Alle Baustellen, Aufgaben und Kosten werden ebenfalls gelöscht.')) return;
-  try {
-    await api('DELETE', '/api/projects/' + pid);
-    showToast('Projekt gelöscht.', 'success');
-    await renderProjekte();
-  } catch(err) { showError(err.message); }
-};
-
-// ============================================================
-// VIEW: PROJEKT DETAIL (#/projekt/<pid>)
-// ============================================================
-
-async function renderProjektDetail(pid) {
-  const view = document.getElementById('view');
-  view.innerHTML = loadingSpinner();
-  const data = await api('GET', '/api/projects/' + pid);
-  const project = data.project;
-  const sites = data.sites || [];
-
-  const cards = sites.length === 0
-    ? emptyState('Noch keine Baustellen in diesem Projekt.')
-    : sites.map(s => `
-      <div class="zeile">
-        <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:8px;">
-          <div>
-            <a href="#/baustelle/${s.id}" class="link">${esc(s.name)}</a>
-            ${s.address ? `<p class="muted">${esc(s.address)}</p>` : ''}
-            <div>${statusBadge(s.status)}</div>
-          </div>
-          <div style="display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end;">
-            <a href="#/baustelle/${s.id}/aufgaben" class="${BS} klein">Aufgaben</a>
-            <button onclick="deleteBaustelle(${s.id},${pid})" class="${BD} klein">🗑</button>
-          </div>
-        </div>
-      </div>`).join('');
-
-  view.innerHTML = `
-    ${breadcrumb([{label:'Projekte',href:'#/projekte'},{label:project.name}])}
-    <div class="seitenkopf">
-      <h1>${esc(project.name)}</h1>
-      <button onclick="openEditProjektModal(${project.id})" class="${BS} klein">✏️</button>
-    </div>
-    ${project.note ? `<p class="muted">${esc(project.note)}</p>` : ''}
-    <div class="box">
-      <div class="box-kopf">
-        <span>Baustellen (${sites.length})</span>
-        <button onclick="openNeuBaustelleModal(${pid})" class="${BP} klein">+ Baustelle</button>
-      </div>
-      <div class="box-inhalt">${cards}</div>
-    </div>`;
-}
-
-// ============================================================
-// VIEW: BAUSTELLEN (#/baustellen)
-// ============================================================
-
-async function renderBaustellen() {
-  const view = document.getElementById('view');
-  view.innerHTML = loadingSpinner();
-  const qs = window.location.hash.includes('?') ? window.location.hash.split('?')[1] : '';
-  const filterPid = new URLSearchParams(qs).get('project') ? parseInt(new URLSearchParams(qs).get('project')) : null;
-
-  const [sitesData, projData] = await Promise.all([
-    api('GET', '/api/sites'),
-    api('GET', '/api/projects'),
-  ]);
-  State.projects = projData.projects || [];
-  State.sites = sitesData.sites || [];
-  const filtered = filterPid ? State.sites.filter(s => s.project_id === filterPid) : State.sites;
-
-  function projName(s) {
-    const p = State.projects.find(p => p.id === s.project_id);
-    return p ? p.name : '–';
-  }
-
-  const projFilter = `<select onchange="baustellenFilter(this.value)" class="${SC}" style="max-width:280px;">
-    <option value="">Alle Projekte</option>
-    ${State.projects.map(p => `<option value="${p.id}" ${filterPid===p.id?'selected':''}>${esc(p.name)}</option>`).join('')}
-  </select>`;
-
-  const cards = filtered.map(s => `
-    <div class="zeile">
-      <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:8px;">
-        <div>
-          <a href="#/baustelle/${s.id}" class="link">${esc(s.name)}</a>
-          ${s.address ? `<p class="muted">${esc(s.address)}</p>` : ''}
-          <p class="muted">${esc(projName(s))}</p>
-          <p class="muted">${formatEuro(s.total_cost)} · ${s.open_task_count} offen</p>
-          <div>${statusBadge(s.status)}</div>
-        </div>
-        <div style="display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end;">
-          <a href="#/baustelle/${s.id}/aufgaben" class="${BS} klein">Aufgaben</a>
-          <button onclick="deleteBaustelle(${s.id})" class="${BD} klein">🗑</button>
-        </div>
-      </div>
-    </div>`).join('');
-
-  const tableRows = filtered.map(s => `
-    <tr>
-      <td><a href="#/baustelle/${s.id}" class="link">${esc(s.name)}</a></td>
-      <td>${esc(s.address||'–')}</td>
-      <td>${esc(projName(s))}</td>
-      <td>${statusBadge(s.status)}</td>
-      <td>${formatEuro(s.total_cost)}</td>
-      <td>
-        <div style="display:flex; gap:8px; justify-content:flex-end;">
-          <a href="#/baustelle/${s.id}/aufgaben" class="${BS} klein">Aufgaben</a>
-          <button onclick="deleteBaustelle(${s.id})" class="${BD} klein">🗑</button>
-        </div>
-      </td>
-    </tr>`).join('');
-
-  const inner = filtered.length === 0
-    ? emptyState('Keine Baustellen gefunden.')
-    : `<div class="nur-mobil box-inhalt">${cards}</div>
-       <div class="nur-desktop scrollx">
-         <table>
-           <thead>
-             <tr><th>Name</th><th>Adresse</th><th>Projekt</th><th>Status</th><th>Kosten</th><th></th></tr>
-           </thead>
-           <tbody>${tableRows}</tbody>
-         </table>
-       </div>`;
-
-  view.innerHTML = `
-    <div class="seitenkopf">
-      <h1>Baustellen</h1>
-      <button onclick="openNeuBaustelleModal()" class="${BP}">+ Baustelle</button>
-    </div>
-    ${projFilter}
-    <div class="box">${inner}</div>`;
-}
-
-window.baustellenFilter = function(pid) {
-  window.location.hash = '#/baustellen' + (pid ? '?project=' + pid : '');
-};
-
-// ============================================================
-// BAUSTELLE: NEU / BEARBEITEN / LÖSCHEN
-// ============================================================
-
-window.openNeuBaustelleModal = async function(preselectedPid) {
-  if (!State.projects.length) {
-    const d = await api('GET', '/api/projects');
-    State.projects = d.projects || [];
-  }
-  const projOpts = State.projects.map(p =>
-    `<option value="${p.id}" ${p.id == preselectedPid ? 'selected' : ''}>${esc(p.name)}</option>`
-  ).join('');
-  openModal(`${modalHeader('Neue Baustelle')}
-    <form onsubmit="submitNeuBaustelle(event)" class="box-inhalt">
-      ${formRow('Name *', `<input id="mf-bn-name" required placeholder="z.B. MFH Deisterstraße 40">`)}
-      ${formRow('Adresse', `<input id="mf-bn-addr" placeholder="Straße, Ort">`)}
-      ${formRow('Projekt *', `<select id="mf-bn-pid" class="${SC}" required>
-        <option value="">– Projekt wählen –</option>${projOpts}</select>`)}
-      ${formRow('Status', `<select id="mf-bn-status" class="${SC}">
-        <option value="aktiv">Aktiv</option>
-        <option value="abgeschlossen">Abgeschlossen</option>
-      </select>`)}
-      ${formRow('Notiz', `<textarea id="mf-bn-note" class="" rows="2" placeholder="Optional"></textarea>`)}
-      <div class="aktionen">
-        <button type="submit" class="${BP}">Speichern</button>
-        <button type="button" onclick="closeModal()" class="${BS}">Abbrechen</button>
-      </div>
-    </form>`);
-};
-
-window.submitNeuBaustelle = async function(e) {
-  e.preventDefault();
-  const pid = document.getElementById('mf-bn-pid').value;
-  if (!pid) { showError('Bitte ein Projekt auswählen.'); return; }
-  try {
-    const res = await api('POST', '/api/sites', {
-      name: document.getElementById('mf-bn-name').value.trim(),
-      address: document.getElementById('mf-bn-addr').value.trim() || null,
-      project_id: parseInt(pid),
-      status: document.getElementById('mf-bn-status').value,
-      note: document.getElementById('mf-bn-note').value.trim() || null,
-    });
-    showToast('Baustelle angelegt.', 'success');
-    closeModal();
-    navigate('#/baustelle/' + res.id);
-  } catch(err) { showError(err.message); }
-};
-
-window.deleteBaustelle = async function(sid, redirectPid) {
-  if (!confirm('Baustelle wirklich löschen? Alle Gewerke, Aufgaben und Kosten werden ebenfalls gelöscht.')) return;
-  try {
-    await api('DELETE', '/api/sites/' + sid);
-    showToast('Baustelle gelöscht.', 'success');
-    if (redirectPid) navigate('#/projekt/' + redirectPid);
-    else await renderBaustellen();
-  } catch(err) { showError(err.message); }
-};
-
-// ============================================================
-// VIEW: BAUSTELLE DETAIL (#/baustelle/<sid>)
-// ============================================================
-
-async function renderBaustelleDetail(sid) {
-  const view = document.getElementById('view');
-  view.innerHTML = loadingSpinner();
-  const [siteData, summData] = await Promise.all([
-    api('GET', '/api/sites/' + sid),
-    api('GET', '/api/sites/' + sid + '/summary'),
-  ]);
-  const site = siteData.site;
-  const trades = siteData.trades || [];
-  const summary = summData.summary;
-
-  if (!State.projects.length) {
-    const d = await api('GET', '/api/projects');
-    State.projects = d.projects || [];
-  }
-  const proj = State.projects.find(p => p.id === site.project_id);
-
-  ViewData.trades = trades;
-
-  const tradeCards = trades.length === 0
-    ? emptyState('Noch keine Gewerke angelegt.')
-    : trades.map(t => `
-      <div class="zeile">
-        <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
-          <div>
-            <a href="#/baustelle/${sid}/aufgaben?trade=${t.id}" class="link">${esc(t.name)}</a>
-            ${t.task_count != null ? `<p class="muted">${t.task_count} Aufgabe(n) · ${formatEuro(t.gesamt||0)}</p>` : ''}
-          </div>
-          <div style="display:flex; gap:8px; flex-shrink:0;">
-            <button onclick="openEditGewerk(${t.id})" class="${BS} klein">✏️</button>
-            <button onclick="deleteGewerk(${t.id},${sid})" class="${BD} klein">🗑</button>
-          </div>
-        </div>
-      </div>`).join('');
-
-  view.innerHTML = `
-    ${breadcrumb([{label:'Baustellen',href:'#/baustellen'},{label:site.name}])}
-    <div class="seitenkopf">
-      <h1>${esc(site.name)}</h1>
-      <button onclick="openEditBaustelleModal(${sid})" class="${BS} klein">✏️</button>
-    </div>
-    ${site.address ? `<p class="muted">${esc(site.address)}</p>` : ''}
-    <div class="aktionen">
-      ${statusBadge(site.status)}
-      ${proj ? `<span class="muted">Projekt: <a href="#/projekt/${proj.id}" class="link">${esc(proj.name)}</a></span>` : ''}
-    </div>
-    <div class="aktionen">
-      <a href="#/baustelle/${sid}/aufgaben" class="${BP}">Aufgaben</a>
-      <a href="#/baustelle/${sid}/dokumente" class="${BS}">Dokumente</a>
-    </div>
-
-    <h2>Kostenübersicht</h2>
-    ${costGrid(summary)}
-    ${tradeBreakdown((summary||{}).by_trade||[])}
-
-    <div class="box">
-      <div class="box-kopf">
-        <span>Gewerke (${trades.length})</span>
-        <button onclick="openNeuGewerkModal(${sid})" class="${BP} klein">+ Gewerk</button>
-      </div>
-      <div class="box-inhalt">${tradeCards}</div>
-    </div>`;
-}
-
-window.openEditBaustelleModal = async function(sid) {
-  const data = await api('GET', '/api/sites/' + sid);
-  const s = data.site;
-  if (!State.projects.length) {
-    const d = await api('GET', '/api/projects');
-    State.projects = d.projects || [];
-  }
-  const projOpts = State.projects.map(p =>
-    `<option value="${p.id}" ${p.id === s.project_id ? 'selected' : ''}>${esc(p.name)}</option>`
-  ).join('');
-  openModal(`${modalHeader('Baustelle bearbeiten')}
-    <form onsubmit="submitEditBaustelle(event,${sid})" class="box-inhalt">
-      ${formRow('Name *', `<input id="mf-be-name" required value="${esc(s.name)}">`)}
-      ${formRow('Adresse', `<input id="mf-be-addr" value="${esc(s.address||'')}">`)}
-      ${formRow('Projekt', `<select id="mf-be-pid" class="${SC}">${projOpts}</select>`)}
-      ${formRow('Status', `<select id="mf-be-status" class="${SC}">
-        <option value="aktiv" ${s.status==='aktiv'?'selected':''}>Aktiv</option>
-        <option value="abgeschlossen" ${s.status==='abgeschlossen'?'selected':''}>Abgeschlossen</option>
-      </select>`)}
-      ${formRow('Notiz', `<textarea id="mf-be-note" class="" rows="2">${esc(s.note||'')}</textarea>`)}
-      <div class="aktionen">
-        <button type="submit" class="${BP}">Speichern</button>
-        <button type="button" onclick="closeModal()" class="${BS}">Abbrechen</button>
-      </div>
-    </form>`);
-};
-
-window.submitEditBaustelle = async function(e, sid) {
-  e.preventDefault();
-  try {
-    await api('PUT', '/api/sites/' + sid, {
-      name:       document.getElementById('mf-be-name').value.trim(),
-      address:    document.getElementById('mf-be-addr').value.trim() || null,
-      project_id: parseInt(document.getElementById('mf-be-pid').value),
-      status:     document.getElementById('mf-be-status').value,
-      note:       document.getElementById('mf-be-note').value.trim() || null,
-    });
-    showToast('Baustelle aktualisiert.', 'success');
-    closeModal();
-    await renderBaustelleDetail(sid);
-  } catch(err) { showError(err.message); }
-};
-
-// ============================================================
-// GEWERKE MODALS
-// ============================================================
-
-window.openNeuGewerkModal = function(sid) {
-  const suggestions = ['Maurer','Elektro','Sanitär','Trockenbau','Dach','Fenster','Maler','Böden','Heizung'];
-  openModal(`${modalHeader('Gewerk hinzufügen')}
-    <form onsubmit="submitNeuGewerk(event,${sid})" class="box-inhalt">
-      ${formRow('Name *', `<input id="mf-gn-name" required placeholder="z.B. Maurer">`)}
-      <div class="aktionen">
-        ${suggestions.map(s => `<button type="button" onclick="document.getElementById('mf-gn-name').value='${s}'"
-          class="btn hell klein">${s}</button>`).join('')}
-      </div>
-      <div class="aktionen">
-        <button type="submit" class="${BP}">Hinzufügen</button>
-        <button type="button" onclick="closeModal()" class="${BS}">Abbrechen</button>
-      </div>
-    </form>`);
-};
-
-window.submitNeuGewerk = async function(e, sid) {
-  e.preventDefault();
-  try {
-    await api('POST', '/api/sites/' + sid + '/trades', { name: document.getElementById('mf-gn-name').value.trim() });
-    showToast('Gewerk angelegt.', 'success');
-    closeModal();
-    await renderBaustelleDetail(sid);
-  } catch(err) { showError(err.message); }
-};
-
-window.openEditGewerk = function(tid) {
-  const t = (ViewData.trades || []).find(x => x.id === tid);
-  if (!t) { showError('Gewerk nicht gefunden.'); return; }
-  openModal(`${modalHeader('Gewerk umbenennen')}
-    <form onsubmit="submitEditGewerk(event,${tid})" class="box-inhalt">
-      ${formRow('Name *', `<input id="mf-ge-name" required value="${esc(t.name)}">`)}
-      <div class="aktionen">
-        <button type="submit" class="${BP}">Speichern</button>
-        <button type="button" onclick="closeModal()" class="${BS}">Abbrechen</button>
-      </div>
-    </form>`);
-};
-
-window.submitEditGewerk = async function(e, tid) {
-  e.preventDefault();
-  try {
-    await api('PUT', '/api/trades/' + tid, { name: document.getElementById('mf-ge-name').value.trim() });
-    showToast('Gewerk aktualisiert.', 'success');
-    closeModal();
-    render();
-  } catch(err) { showError(err.message); }
-};
-
-window.deleteGewerk = async function(tid, sid) {
-  if (!confirm('Gewerk löschen?')) return;
-  try {
-    await api('DELETE', '/api/trades/' + tid);
-    showToast('Gewerk gelöscht.', 'success');
-    await renderBaustelleDetail(sid);
-  } catch(err) { showError(err.message); }
-};
-
-// ============================================================
-// VIEW: PERSONEN (#/personen)
-// ============================================================
-
-async function renderPersonen() {
-  const view = document.getElementById('view');
-  view.innerHTML = loadingSpinner();
-  const data = await api('GET', '/api/persons');
-  const persons = data.persons || [];
-  ViewData.persons = persons;
-
-  const zeilen = persons.map(p => `
-    <tr style="${p.active ? '' : 'opacity:.5;'}">
-      <td>${esc(p.name)}${p.note ? `<div class="muted">${esc(p.note)}</div>` : ''}</td>
-      <td class="r">${formatEuro(p.hourly_rate)}/h</td>
-      <td class="r">${formatZahl(p.sum_hours)} h</td>
-      <td class="r">${formatEuro(p.sum_cost)}</td>
-      <td>${p.active ? '<span class="badge aktiv">aktiv</span>' : '<span class="badge abgeschlossen">inaktiv</span>'}</td>
-      <td><div style="display:flex; gap:4px; justify-content:flex-end;">
-        <button onclick="openEditPersonModal(${p.id})" class="${BS} klein">✏️</button>
-        <button onclick="deletePerson(${p.id})" class="${BD} klein">🗑</button>
-      </div></td>
-    </tr>`).join('');
-
-  const karten = persons.map(p => `
-    <div class="zeile" style="${p.active ? '' : 'opacity:.5;'}">
-      <div style="display:flex; justify-content:space-between; gap:8px;">
-        <div>
-          <b>${esc(p.name)}</b> · ${formatEuro(p.hourly_rate)}/h
-          <div class="muted">${formatZahl(p.sum_hours)} h · ${formatEuro(p.sum_cost)}
-            ${p.active ? '' : ' · inaktiv'}</div>
-        </div>
-        <div style="display:flex; gap:4px;">
-          <button onclick="openEditPersonModal(${p.id})" class="${BS} klein">✏️</button>
-          <button onclick="deletePerson(${p.id})" class="${BD} klein">🗑</button>
-        </div>
-      </div>
-    </div>`).join('');
-
-  const inner = persons.length === 0
-    ? emptyState('Noch keine Personen angelegt.')
-    : `<div class="nur-mobil box-inhalt">${karten}</div>
-       <div class="nur-desktop scrollx">
-         <table>
-           <thead><tr><th>Name</th><th class="r">Standard-Satz</th><th class="r">Σ Stunden</th>
-             <th class="r">Σ Kosten</th><th>Status</th><th></th></tr></thead>
-           <tbody>${zeilen}</tbody>
-         </table>
-       </div>`;
-
-  view.innerHTML = `
-    <div class="seitenkopf">
-      <h1>Personen</h1>
-      <button onclick="openNeuPersonModal()" class="${BP}">+ Neue Person</button>
-    </div>
-    <div class="box">${inner}</div>`;
-}
-
-window.openNeuPersonModal = function() {
-  openModal(`${modalHeader('Neue Person')}
-    <form onsubmit="submitNeuPerson(event)" class="box-inhalt">
-      ${formRow('Name *', `<input id="mf-psn-name" required placeholder="z.B. Robert">`)}
-      ${formRow('Standard-Stundensatz (€/h)', `<input id="mf-psn-rate" type="number" step="0.5" min="0" value="0">`)}
-      ${formRow('Notiz', `<textarea id="mf-psn-note" rows="2" placeholder="Optional"></textarea>`)}
-      <div class="aktionen">
-        <button type="submit" class="${BP}">Speichern</button>
-        <button type="button" onclick="closeModal()" class="${BS}">Abbrechen</button>
-      </div>
-    </form>`);
-};
-
-window.submitNeuPerson = async function(e) {
-  e.preventDefault();
-  try {
-    await api('POST', '/api/persons', {
-      name: document.getElementById('mf-psn-name').value.trim(),
-      hourly_rate: parseFloat(document.getElementById('mf-psn-rate').value) || 0,
-      note: document.getElementById('mf-psn-note').value.trim() || null,
-    });
-    showToast('Person angelegt.', 'success');
-    closeModal();
-    await renderPersonen();
-  } catch (err) { showError(err.message); }
-};
-
-window.openEditPersonModal = function(pid) {
-  const p = (ViewData.persons || []).find(x => x.id === pid);
-  if (!p) { showError('Person nicht gefunden.'); return; }
-  openModal(`${modalHeader('Person bearbeiten')}
-    <form onsubmit="submitEditPerson(event,${pid})" class="box-inhalt">
-      ${formRow('Name *', `<input id="mf-pse-name" required value="${esc(p.name)}">`)}
-      ${formRow('Standard-Stundensatz (€/h)', `<input id="mf-pse-rate" type="number" step="0.5" min="0" value="${p.hourly_rate}">`)}
-      ${formRow('Status', `<select id="mf-pse-active">
-        <option value="1" ${p.active ? 'selected' : ''}>aktiv</option>
-        <option value="0" ${p.active ? '' : 'selected'}>inaktiv</option>
-      </select>`)}
-      ${formRow('Notiz', `<textarea id="mf-pse-note" rows="2">${esc(p.note || '')}</textarea>`)}
-      <div class="aktionen">
-        <button type="submit" class="${BP}">Speichern</button>
-        <button type="button" onclick="closeModal()" class="${BS}">Abbrechen</button>
-      </div>
-    </form>`);
-};
-
-window.submitEditPerson = async function(e, pid) {
-  e.preventDefault();
-  try {
-    await api('PUT', '/api/persons/' + pid, {
-      name: document.getElementById('mf-pse-name').value.trim(),
-      hourly_rate: parseFloat(document.getElementById('mf-pse-rate').value) || 0,
-      active: parseInt(document.getElementById('mf-pse-active').value),
-      note: document.getElementById('mf-pse-note').value.trim() || null,
-    });
-    showToast('Person aktualisiert.', 'success');
-    closeModal();
-    await renderPersonen();
-  } catch (err) { showError(err.message); }
-};
-
-window.deletePerson = async function(pid) {
-  if (!confirm('Person wirklich löschen?')) return;
-  try {
-    await api('DELETE', '/api/persons/' + pid);
-    showToast('Person gelöscht.', 'success');
-    await renderPersonen();
-  } catch (err) {
-    showError(err.message);  // 409-Meldung enthält den Deaktivieren-Hinweis
-  }
-};
-
-// ============================================================
-// VIEW: AUFGABEN (#/baustelle/<sid>/aufgaben)
-// ============================================================
-
-async function renderAufgaben(sid) {
-  const view = document.getElementById('view');
-  view.innerHTML = loadingSpinner();
-
-  const qs = window.location.hash.includes('?') ? window.location.hash.split('?')[1] : '';
-  const params = new URLSearchParams(qs);
-  const filterTrade  = params.get('trade')  || '';
-  const filterStatus = params.get('status') || '';
-
-  let apiPath = '/api/sites/' + sid + '/tasks';
-  const qp = [];
-  if (filterTrade)  qp.push('trade=' + filterTrade);
-  if (filterStatus) qp.push('status=' + encodeURIComponent(filterStatus));
-  if (qp.length) apiPath += '?' + qp.join('&');
-
-  const [siteData, tasksData, tradesData] = await Promise.all([
-    api('GET', '/api/sites/' + sid),
-    api('GET', apiPath),
-    api('GET', '/api/sites/' + sid + '/trades'),
-  ]);
-  const site   = siteData.site;
-  const tasks  = tasksData.tasks  || [];
-  const trades = tradesData.trades || [];
-
-  function tradeName(tid) {
-    const t = trades.find(t => t.id === tid);
-    return t ? t.name : '–';
-  }
-
-  const tradeOpts = '<option value="">Alle Gewerke</option>' +
-    trades.map(t => `<option value="${t.id}" ${filterTrade==t.id?'selected':''}>${esc(t.name)}</option>`).join('');
-  const statusOpts = '<option value="">Alle Status</option>' +
-    ['offen','in Arbeit','fertig'].map(s => `<option value="${s}" ${filterStatus===s?'selected':''}>${s}</option>`).join('');
-
-  const cards = tasks.map(t => `
-    <div class="zeile">
-      <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:8px;">
-        <div>
-          <a href="#/aufgabe/${t.id}" class="link">${esc(t.title)}</a>
-          <div style="display:flex; flex-wrap:wrap; gap:4px; align-items:center;">
-            ${statusBadge(t.status)}
-            <span class="muted">${esc(tradeName(t.trade_id))}</span>
-          </div>
-          ${t.total_cost != null ? `<p class="muted">Kosten: ${formatEuro(t.total_cost)}</p>` : ''}
-        </div>
-        <a href="#/aufgabe/${t.id}" class="${BS} klein" style="flex-shrink:0;">Detail</a>
-      </div>
-    </div>`).join('');
-
-  const tableRows = tasks.map(t => `
-    <tr>
-      <td><a href="#/aufgabe/${t.id}" class="link">${esc(t.title)}</a></td>
-      <td>${esc(tradeName(t.trade_id))}</td>
-      <td>${statusBadge(t.status)}</td>
-      <td>${t.total_cost != null ? formatEuro(t.total_cost) : '–'}</td>
-      <td><a href="#/aufgabe/${t.id}" class="${BS} klein">Detail</a></td>
-    </tr>`).join('');
-
-  const inner = tasks.length === 0
-    ? emptyState('Keine Aufgaben gefunden.')
-    : `<div class="nur-mobil box-inhalt">${cards}</div>
-       <div class="nur-desktop scrollx">
-         <table>
-           <thead>
-             <tr><th>Titel</th><th>Gewerk</th><th>Status</th><th>Kosten</th><th></th></tr>
-           </thead>
-           <tbody>${tableRows}</tbody>
-         </table>
-       </div>`;
-
-  view.innerHTML = `
-    ${breadcrumb([{label:'Baustellen',href:'#/baustellen'},{label:site.name,href:'#/baustelle/'+sid},{label:'Aufgaben'}])}
-    <div class="seitenkopf">
-      <h1>Aufgaben</h1>
-      <button onclick="openNeuAufgabeModal(${sid})" class="${BP}">+ Aufgabe</button>
-    </div>
-    <div class="aktionen">
-      <select onchange="aufgabenFilter(${sid},'trade',this.value)" class="${SC}" style="max-width:180px;">${tradeOpts}</select>
-      <select onchange="aufgabenFilter(${sid},'status',this.value)" class="${SC}" style="max-width:160px;">${statusOpts}</select>
-    </div>
-    <div class="box">${inner}</div>`;
-}
-
-window.aufgabenFilter = function(sid, key, val) {
-  const qs = window.location.hash.includes('?') ? window.location.hash.split('?')[1] : '';
-  const p  = new URLSearchParams(qs);
-  if (val) p.set(key, val); else p.delete(key);
-  const s = p.toString();
-  window.location.hash = '#/baustelle/' + sid + '/aufgaben' + (s ? '?' + s : '');
-};
-
-// ============================================================
-// VIEW: AUFGABEN GESAMT (#/aufgaben)
-// ============================================================
-
-async function renderAufgabenGesamt() {
-  const view = document.getElementById('view');
-  view.innerHTML = `<h1>Aufgaben</h1>
-    <p class="muted">Bitte eine Baustelle wählen:</p>`;
-  const data = await api('GET', '/api/sites');
-  const sites = data.sites || [];
-  if (!sites.length) { view.innerHTML += emptyState('Noch keine Baustellen angelegt.'); return; }
-  view.innerHTML += `<div class="box"><div class="box-inhalt">` + sites.map(s => `
-    <a href="#/baustelle/${s.id}/aufgaben" class="zeile" style="display:block; text-decoration:none; color:inherit;">
-      <span class="link">${esc(s.name)}</span>
-      ${s.address ? `<div class="muted">${esc(s.address)}</div>` : ''}
-    </a>`).join('') + `</div></div>`;
-}
-
-// ============================================================
-// AUFGABEN MODALS
-// ============================================================
-
-window.openNeuAufgabeModal = async function(sid) {
-  const td = await api('GET', '/api/sites/' + sid + '/trades');
-  const trades = td.trades || [];
-  const tradeOpts = '<option value="">Kein Gewerk</option>' +
-    trades.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join('');
-  openModal(`${modalHeader('Neue Aufgabe')}
-    <form onsubmit="submitNeuAufgabe(event,${sid})" class="box-inhalt">
-      ${formRow('Titel *', `<input id="mf-an-title" required placeholder="z.B. Wand ziehen">`)}
-      ${formRow('Gewerk', `<select id="mf-an-trade" class="${SC}">${tradeOpts}</select>`)}
-      ${formRow('Status', `<select id="mf-an-status" class="${SC}">
-        <option value="offen">offen</option>
-        <option value="in Arbeit">in Arbeit</option>
-        <option value="fertig">fertig</option>
-      </select>`)}
-      ${formRow('Beschreibung', `<textarea id="mf-an-desc" class="" rows="3" placeholder="Optional"></textarea>`)}
-      <div class="aktionen">
-        <button type="submit" class="${BP}">Speichern</button>
-        <button type="button" onclick="closeModal()" class="${BS}">Abbrechen</button>
-      </div>
-    </form>`);
-};
-
-window.submitNeuAufgabe = async function(e, sid) {
-  e.preventDefault();
-  const trade = document.getElementById('mf-an-trade').value;
-  try {
-    const res = await api('POST', '/api/sites/' + sid + '/tasks', {
-      title:       document.getElementById('mf-an-title').value.trim(),
-      trade_id:    trade ? parseInt(trade) : null,
-      status:      document.getElementById('mf-an-status').value,
-      description: document.getElementById('mf-an-desc').value.trim() || null,
-    });
-    showToast('Aufgabe angelegt.', 'success');
-    closeModal();
-    navigate('#/aufgabe/' + res.id);
-  } catch(err) { showError(err.message); }
-};
-
-// ============================================================
-// VIEW: AUFGABE DETAIL (#/aufgabe/<id>)
-// ============================================================
-
-async function renderAufgabeDetail(taskId) {
-  const view = document.getElementById('view');
-  view.innerHTML = loadingSpinner();
-
-  const data = await api('GET', '/api/tasks/' + taskId);
-  const task  = data.task;
-  const times = data.time_entries || [];
-  const mats  = data.materials    || [];
-  const docs  = data.documents    || [];
-  const kosten = data.kosten      || {};
-
-  let trades = [];
-  try {
-    const td = await api('GET', '/api/sites/' + task.site_id + '/trades');
-    trades = td.trades || [];
-  } catch {}
-
-  function tradeName(tid) {
-    const t = trades.find(t => t.id === tid);
-    return t ? t.name : (tid ? 'Gewerk #' + tid : '–');
-  }
-
-  // --- Zeiteinträge ---
-  const timeCards = times.map(e => `
-    <div class="zeile">
-      <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">
-        <div>
-          <span style="font-weight:bold;">${esc(e.person)}</span>
-          ${e.work_date ? `<span class="muted">${esc(formatDatum(e.work_date))}</span>` : ''}
-          <p class="muted">${formatZahl(e.hours)} h × ${formatEuro(e.hourly_rate)}/h = <span style="font-weight:bold;">${formatEuro(e.kosten)}</span></p>
-          <div>${billedBadge(e.billed)}</div>
-        </div>
-        <div style="display:flex; gap:4px; flex-shrink:0;">
-          <button onclick="openEditTimeEntry(${e.id},${taskId})" class="${BS} klein">✏️</button>
-          <button onclick="deleteTimeEntry(${e.id},${taskId})" class="${BD} klein">🗑</button>
-        </div>
-      </div>
-    </div>`).join('');
-
-  const timeTable = `<div class="nur-desktop scrollx">
-    <table>
-      <thead>
-        <tr><th>Person</th><th>Datum</th>
-          <th class="r">Stunden</th><th class="r">Satz</th>
-          <th class="r">Kosten</th><th>Rechnung</th><th></th></tr>
-      </thead>
-      <tbody>
-        ${times.map(e => `<tr>
-          <td>${esc(e.person)}</td>
-          <td>${esc(e.work_date ? formatDatum(e.work_date) : '–')}</td>
-          <td class="r">${formatZahl(e.hours)}</td>
-          <td class="r">${formatEuro(e.hourly_rate)}</td>
-          <td class="r">${formatEuro(e.kosten)}</td>
-          <td>${billedBadge(e.billed)}</td>
-          <td><div style="display:flex; gap:4px; justify-content:flex-end;">
-            <button onclick="openEditTimeEntry(${e.id},${taskId})" class="${BS} klein">✏️</button>
-            <button onclick="deleteTimeEntry(${e.id},${taskId})" class="${BD} klein">🗑</button>
-          </div></td>
-        </tr>`).join('')}
-      </tbody>
-    </table>
-  </div>`;
-
-  const timeHTML = times.length === 0
-    ? `<p class="muted">Noch keine Zeiteinträge.</p>`
-    : `<div class="nur-mobil">${timeCards}</div>${timeTable}`;
-
-  // --- Material ---
-  const matCards = mats.map(m => `
-    <div class="zeile">
-      <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">
-        <div>
-          <span style="font-weight:bold;">${esc(m.name)}</span>
-          <p class="muted">${formatZahl(m.qty)} ${esc(m.unit||'Stk')} × ${formatEuro(m.unit_price)} = <span style="font-weight:bold;">${formatEuro(m.kosten)}</span></p>
-          <div>${billedBadge(m.billed)}</div>
-        </div>
-        <div style="display:flex; gap:4px; flex-shrink:0;">
-          <button onclick="openEditMaterial(${m.id},${taskId})" class="${BS} klein">✏️</button>
-          <button onclick="deleteMaterial(${m.id},${taskId})" class="${BD} klein">🗑</button>
-        </div>
-      </div>
-    </div>`).join('');
-
-  const matTable = `<div class="nur-desktop scrollx">
-    <table>
-      <thead>
-        <tr><th>Bezeichnung</th><th class="r">Menge</th>
-          <th>Einheit</th><th class="r">Einzelpreis</th>
-          <th class="r">Summe</th><th>Rechnung</th><th></th></tr>
-      </thead>
-      <tbody>
-        ${mats.map(m => `<tr>
-          <td>${esc(m.name)}</td>
-          <td class="r">${formatZahl(m.qty)}</td>
-          <td>${esc(m.unit||'Stk')}</td>
-          <td class="r">${formatEuro(m.unit_price)}</td>
-          <td class="r">${formatEuro(m.kosten)}</td>
-          <td>${billedBadge(m.billed)}</td>
-          <td><div style="display:flex; gap:4px; justify-content:flex-end;">
-            <button onclick="openEditMaterial(${m.id},${taskId})" class="${BS} klein">✏️</button>
-            <button onclick="deleteMaterial(${m.id},${taskId})" class="${BD} klein">🗑</button>
-          </div></td>
-        </tr>`).join('')}
-      </tbody>
-    </table>
-  </div>`;
-
-  const matHTML = mats.length === 0
-    ? `<p class="muted">Noch keine Materialpositionen.</p>`
-    : `<div class="nur-mobil">${matCards}</div>${matTable}`;
-
-  // --- Dokumente ---
-  const docGrid = docs.length === 0
-    ? `<p class="muted">Noch keine Dokumente.</p>`
-    : `<div class="galerie">
-        ${docs.map(d => {
-          const isImg = d.mime && d.mime.startsWith('image/');
-          const thumb = isImg
-            ? `<img src="/api/documents/${d.id}/file" alt="${esc(d.filename)}" loading="lazy" class="thumb">`
-            : `<div class="thumb">PDF</div>`;
-          const plBtn = d.paperless_url
-            ? `<a href="${esc(d.paperless_url)}" target="_blank" rel="noopener" class="badge mit">✓ Paperless</a>`
-            : (State.paperlessEnabled ? `<button onclick="sendToPaperless(${d.id},${taskId})" class="btn-link">→ Paperless</button>` : '');
-          return `<div style="position:relative;">
-            <a href="/api/documents/${d.id}/file" target="_blank" rel="noopener">${thumb}</a>
-            <p class="muted" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${esc(d.filename)}">${esc(d.filename)}</p>
-            <div style="display:flex; flex-wrap:wrap; gap:4px; align-items:center;">${plBtn}</div>
-            <button onclick="deleteDoc(${d.id},${taskId})"
-              class="btn rot klein" style="position:absolute; top:4px; right:4px;" aria-label="Löschen">✕</button>
-          </div>`;
-        }).join('')}
-      </div>`;
-
-  view.innerHTML = `
-    ${breadcrumb([
-      {label:'Baustellen',href:'#/baustellen'},
-      {label:'Baustelle',href:'#/baustelle/'+task.site_id},
-      {label:'Aufgaben',href:'#/baustelle/'+task.site_id+'/aufgaben'},
-      {label:task.title}
-    ])}
-
-    <div class="box box-pad">
-      <div style="display:flex; flex-wrap:wrap; align-items:flex-start; justify-content:space-between; gap:12px;">
-        <div>
-          <h1>${esc(task.title)}</h1>
-          <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:8px;">
-            ${statusBadge(task.status)}
-            <span class="muted">${esc(tradeName(task.trade_id))}</span>
-          </div>
-          ${task.description ? `<p class="muted" style="white-space:pre-wrap;">${esc(task.description)}</p>` : ''}
-        </div>
-        <button onclick="openEditAufgabeModal(${taskId})" class="${BS}">✏️ Bearbeiten</button>
-      </div>
-
-      <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:16px; border-top:1px solid var(--line); padding-top:12px;">
-        <span class="muted">Status:</span>
-        ${['offen','in Arbeit','fertig'].map(s =>
-          `<button onclick="changeStatus(${taskId},'${s}')"
-            class="${task.status === s ? 'btn klein' : 'btn hell klein'}">${s}</button>`
-        ).join('')}
-      </div>
-    </div>
-
-    <div class="karten">
-      <div class="karte"><div class="label">Material</div><div class="zahl">${formatEuro(kosten.material)}</div></div>
-      <div class="karte"><div class="label">Personal</div><div class="zahl">${formatEuro(kosten.personal)}</div></div>
-      <div class="karte ok"><div class="label">Gesamt</div><div class="zahl">${formatEuro(kosten.gesamt)}</div></div>
-    </div>
-
-    <div class="box">
-      <div class="box-kopf">
-        <span>Zeiten (Personal)</span>
-        <button onclick="openNeuTimeEntry(${taskId})" class="${BP} klein">+ Zeit erfassen</button>
-      </div>
-      <div class="box-inhalt">${timeHTML}</div>
-    </div>
-
-    <div class="box">
-      <div class="box-kopf">
-        <span>Material</span>
-        <button onclick="openNeuMaterial(${taskId})" class="${BP} klein">+ Materialposition</button>
-      </div>
-      <div class="box-inhalt">${matHTML}</div>
-    </div>
-
-    <div class="box">
-      <div class="box-kopf">
-        <span>Dokumente &amp; Fotos</span>
-        <button onclick="openUploadModal(${taskId},null)" class="${BP} klein">+ Hochladen</button>
-      </div>
-      <div class="box-inhalt">${docGrid}</div>
-    </div>
-
-    <button onclick="deleteAufgabe(${taskId},${task.site_id})" class="${BD}" style="width:100%; margin-top:8px;">Aufgabe löschen</button>`;
-}
-
-window.changeStatus = async function(taskId, status) {
-  try {
-    await api('PUT', '/api/tasks/' + taskId, { status });
-    await renderAufgabeDetail(taskId);
-  } catch(err) { showError(err.message); }
-};
-
-window.deleteAufgabe = async function(taskId, sid) {
-  if (!confirm('Aufgabe wirklich löschen?')) return;
-  try {
-    await api('DELETE', '/api/tasks/' + taskId);
-    showToast('Aufgabe gelöscht.', 'success');
-    navigate('#/baustelle/' + sid + '/aufgaben');
-  } catch(err) { showError(err.message); }
-};
-
-window.openEditAufgabeModal = async function(taskId) {
-  const data = await api('GET', '/api/tasks/' + taskId);
-  const task = data.task;
-  let trades = [];
-  try {
-    const td = await api('GET', '/api/sites/' + task.site_id + '/trades');
-    trades = td.trades || [];
-  } catch {}
-  const tradeOpts = '<option value="">Kein Gewerk</option>' +
-    trades.map(t => `<option value="${t.id}" ${t.id===task.trade_id?'selected':''}>${esc(t.name)}</option>`).join('');
-  openModal(`${modalHeader('Aufgabe bearbeiten')}
-    <form onsubmit="submitEditAufgabe(event,${taskId})" class="box-inhalt">
-      ${formRow('Titel *', `<input id="mf-ae-title" required value="${esc(task.title)}">`)}
-      ${formRow('Gewerk', `<select id="mf-ae-trade" class="${SC}">${tradeOpts}</select>`)}
-      ${formRow('Status', `<select id="mf-ae-status" class="${SC}">
-        <option value="offen" ${task.status==='offen'?'selected':''}>offen</option>
-        <option value="in Arbeit" ${task.status==='in Arbeit'?'selected':''}>in Arbeit</option>
-        <option value="fertig" ${task.status==='fertig'?'selected':''}>fertig</option>
-      </select>`)}
-      ${formRow('Beschreibung', `<textarea id="mf-ae-desc" class="" rows="3">${esc(task.description||'')}</textarea>`)}
-      <div class="aktionen">
-        <button type="submit" class="${BP}">Speichern</button>
-        <button type="button" onclick="closeModal()" class="${BS}">Abbrechen</button>
-      </div>
-    </form>`);
-};
-
-window.submitEditAufgabe = async function(e, taskId) {
-  e.preventDefault();
-  const trade = document.getElementById('mf-ae-trade').value;
-  try {
-    await api('PUT', '/api/tasks/' + taskId, {
-      title:       document.getElementById('mf-ae-title').value.trim(),
-      trade_id:    trade ? parseInt(trade) : null,
-      status:      document.getElementById('mf-ae-status').value,
-      description: document.getElementById('mf-ae-desc').value.trim() || null,
-    });
-    showToast('Aufgabe aktualisiert.', 'success');
-    closeModal();
-    await renderAufgabeDetail(taskId);
-  } catch(err) { showError(err.message); }
-};
-
-// ============================================================
-// ZEITERFASSUNG MODALS
-// ============================================================
-
-let _teBilled = 1;
-
-function _personOpts(persons, selectedId) {
-  return persons.map(p =>
-    `<option value="${p.id}" data-rate="${p.hourly_rate}"
-      ${p.id === selectedId ? 'selected' : ''}>${esc(p.name)} (${formatEuro(p.hourly_rate)}/h)${
-        p.active === 0 ? ' – inaktiv' : ''}</option>`
-  ).join('');
-}
-
-window.tePersonChanged = function() {
-  const sel = document.getElementById('mf-te-person-sel');
-  const opt = sel.options[sel.selectedIndex];
-  if (opt && opt.dataset.rate !== undefined) {
-    document.getElementById('mf-te-rate').value = opt.dataset.rate;
-  }
-};
-
-window.teQuickAddPerson = async function() {
-  const name = (document.getElementById('mf-te-neu-name').value || '').trim();
-  const rate = parseFloat(document.getElementById('mf-te-neu-rate').value) || 0;
-  if (!name) { showError('Name für neue Person fehlt.'); return; }
-  try {
-    const res = await api('POST', '/api/persons', { name, hourly_rate: rate });
-    const d = await api('GET', '/api/persons?active=1');
-    ViewData.activePersons = d.persons || [];
-    const sel = document.getElementById('mf-te-person-sel');
-    if (sel) {
-      sel.innerHTML = _personOpts(ViewData.activePersons, res.id);
-      tePersonChanged();
-    } else {
-      // Freitext-Fallback (noch keine Personen vorhanden): kein <select> im Formular,
-      // also die neue Person direkt ins Freitextfeld übernehmen statt abzustürzen.
-      const txt = document.getElementById('mf-te-person-txt');
-      if (txt) txt.value = name;
-    }
-    document.getElementById('mf-te-neu-name').value = '';
-    document.getElementById('mf-te-neu-rate').value = '';
-    showToast('Person angelegt.', 'success');
-  } catch (err) { showError(err.message); }
-};
-
-function _timeEntryFormHTML(entry) {
-  // entry = null (neu) oder bestehender Eintrag (bearbeiten)
-  const persons = ViewData.activePersons || [];
-  const freitextFallback = persons.length === 0 && !entry;
-  const personRow = freitextFallback
-    ? formRow('Person *', `<input id="mf-te-person-txt" required placeholder="Name">`)
-    : formRow('Person *', `
-        <select id="mf-te-person-sel" onchange="tePersonChanged()">
-          ${entry && !entry.person_id
-            ? `<option value="" selected>Freitext: ${esc(entry.person)}</option>` : ''}
-          ${_personOpts(persons, entry ? entry.person_id : null)}
-        </select>`);
-  return `
-    ${personRow}
-    <div class="zeile">
-      <div class="muted" style="margin-bottom:4px;">Schnellanlage neue Person:</div>
-      <div style="display:flex; gap:6px;">
-        <input id="mf-te-neu-name" placeholder="Name" style="flex:2;">
-        <input id="mf-te-neu-rate" type="number" step="0.5" min="0" placeholder="€/h" style="flex:1;">
-        <button type="button" onclick="teQuickAddPerson()" class="${BS} klein">+</button>
-      </div>
-    </div>
-    ${formRow('Datum', `<input id="mf-te-date" type="date" value="${entry ? esc(entry.work_date || '') : ''}">`)}
-    <div class="grid2">
-      ${formRow('Stunden *', `<input id="mf-te-hours" type="number" step="0.25" min="0.25" required value="${entry ? entry.hours : ''}" placeholder="z.B. 8">`)}
-      ${formRow('Stundensatz (€/h) *', `<input id="mf-te-rate" type="number" step="0.01" min="0" required value="${entry ? entry.hourly_rate : ''}" placeholder="z.B. 45">`)}
-    </div>
-    ${formRow('Rechnungs-Flag', billedToggleHTML(entry ? entry.billed : 1, 'setTEBilled'))}`;
-}
-
-function _timeEntryPayload() {
-  const payload = {
-    hours: parseFloat(document.getElementById('mf-te-hours').value),
-    hourly_rate: parseFloat(document.getElementById('mf-te-rate').value),
-    billed: _teBilled,
-    work_date: document.getElementById('mf-te-date').value || null,
+  const tasks = taskListen.flatMap(r => r.tasks);
+  const details = await Promise.all(tasks.map(t => api('GET', `/api/tasks/${t.id}`)));
+  const zeiten = [], materialien = [], docs = new Map();
+  details.forEach(d => {
+    zeiten.push(...d.time_entries);
+    materialien.push(...d.materials);
+    d.documents.forEach(x => docs.set(x.id, x));
+  });
+  docListen.forEach(r => r.documents.forEach(x => docs.set(x.id, x)));
+  const trades = {};
+  siteDetails.forEach((sd, i) => { trades[sites[i].id] = sd.trades; });
+
+  P = {
+    pid, project: pd.project, sites, trades, tasks, zeiten, materialien,
+    docs: [...docs.values()].sort((a, b) => (a.created_at < b.created_at ? 1 : -1)),
+    tab: vorher ? vorher.tab : 'logbuch',
+    filter: vorher ? vorher.filter : { task: '', art: '', zahlung: '' },
+    bereich: vorher && sites.some(s => s.id === vorher.bereich) ? vorher.bereich : null,
   };
-  const sel = document.getElementById('mf-te-person-sel');
-  if (sel) {
-    if (sel.value) payload.person_id = parseInt(sel.value);
-    // leerer Wert = "Freitext beibehalten" (nur beim Bearbeiten möglich)
-  } else {
-    payload.person = document.getElementById('mf-te-person-txt').value.trim();
-  }
-  return payload;
 }
 
-window.setTEBilled = function(val) { _teBilled = val; updateBilledToggle(val); };
+async function neuLaden() {
+  await ladeProjekt(P.pid);
+  zeichneProjekt();
+}
 
-window.openNeuTimeEntry = async function(taskId) {
-  _teBilled = 1;
-  const d = await api('GET', '/api/persons?active=1');
-  ViewData.activePersons = d.persons || [];
-  openModal(`${modalHeader('Zeit erfassen')}
-    <form onsubmit="submitNeuTimeEntry(event,${taskId})" class="box-inhalt">
-      ${_timeEntryFormHTML(null)}
-      <div class="aktionen">
-        <button type="submit" class="${BP}">Speichern</button>
-        <button type="button" onclick="closeModal()" class="${BS}">Abbrechen</button>
-      </div>
-    </form>`);
-  tePersonChanged();  // Satz der ersten Person vorbefüllen
-};
+// --- Nachschlagen ---
+const aufgabe = id => P.tasks.find(t => t.id === Number(id));
+const bereich = id => P.sites.find(s => s.id === Number(id));
+function gewerk(id) {
+  for (const liste of Object.values(P.trades)) {
+    const t = liste.find(x => x.id === id);
+    if (t) return t;
+  }
+  return null;
+}
+const mehrereBereiche = () => P.sites.length > 1;
+function imBereich(taskId) {
+  if (!P.bereich) return true;
+  const t = aufgabe(taskId);
+  return !!t && t.site_id === P.bereich;
+}
+function docTaskId(d) {
+  if (d.task_id) return d.task_id;
+  const m = P.materialien.find(x => x.id === d.material_id);
+  return m ? m.task_id : null;
+}
+function docImBereich(d) {
+  if (!P.bereich) return true;
+  if (d.site_id) return d.site_id === P.bereich;
+  return imBereich(docTaskId(d));
+}
+function aufgabenSortiert() {
+  const rang = { 'in Arbeit': 0, 'offen': 1, 'fertig': 2 };
+  return P.tasks.filter(t => !P.bereich || t.site_id === P.bereich)
+    .sort((a, b) => (rang[a.status] - rang[b.status]) || (a.created_at < b.created_at ? 1 : -1));
+}
+function aufgabeName(taskId) {
+  const t = aufgabe(taskId);
+  if (!t) return '–';
+  return (mehrereBereiche() ? (bereich(t.site_id)?.name || '') + ' · ' : '') + t.title;
+}
 
-window.submitNeuTimeEntry = async function(e, taskId) {
-  e.preventDefault();
-  try {
-    await api('POST', '/api/tasks/' + taskId + '/timeentries', _timeEntryPayload());
-    showToast('Zeiteintrag gespeichert.', 'success');
-    closeModal();
-    await renderAufgabeDetail(taskId);
-  } catch (err) { showError(err.message); }
-};
+// Alle Stunden- und Materialeinträge als ein gemeinsames, nach Datum sortiertes Logbuch
+function eintraege() {
+  const z = P.zeiten.map(e => ({
+    art: 'zeit', id: e.id, task_id: e.task_id, ts: e.created_at,
+    datum: e.work_date || lokalesDatum(e.created_at),
+    betrag: r2(e.hours * e.hourly_rate + (e.travel_cost || 0)), anfahrt: e.travel_cost || 0,
+    billed: e.billed, paid: e.paid, roh: e,
+    gezahlt: e.paid ? r2(e.hours * e.hourly_rate + (e.travel_cost || 0)) : r2(e.paid_amount || 0),
+  }));
+  const m = P.materialien.map(x => ({
+    art: 'material', id: x.id, task_id: x.task_id, ts: x.created_at,
+    datum: lokalesDatum(x.created_at),
+    betrag: r2(x.qty * x.unit_price), billed: x.billed, paid: x.paid, roh: x,
+    gezahlt: x.paid ? r2(x.qty * x.unit_price) : r2(x.paid_amount || 0),
+  }));
+  return [...z, ...m]
+    .filter(e => imBereich(e.task_id))
+    .sort((a, b) => (a.datum < b.datum ? 1 : a.datum > b.datum ? -1 : (a.ts < b.ts ? 1 : -1)));
+}
 
-window.openEditTimeEntry = async function(eid, taskId) {
-  const [d, pd] = await Promise.all([
-    api('GET', '/api/tasks/' + taskId + '/timeentries'),
-    api('GET', '/api/persons'),   // ALLE, siehe unten
-  ]);
-  const entry = (d.time_entries || []).find(e => e.id === eid);
-  if (!entry) { showError('Eintrag nicht gefunden.'); return; }
-  // Ist die Person des Eintrags inaktiv, fehlt sie in der Aktiv-Liste; der
-  // Browser wählt dann die erste andere Person und "Speichern" hängt den
-  // Eintrag stillschweigend um. Darum: aktive Personen + die des Eintrags.
-  ViewData.activePersons = (pd.persons || [])
-    .filter(p => p.active || p.id === entry.person_id);
-  _teBilled = entry.billed;
-  openModal(`${modalHeader('Zeiteintrag bearbeiten')}
-    <form onsubmit="submitEditTimeEntry(event,${eid},${taskId})" class="box-inhalt">
-      ${_timeEntryFormHTML(entry)}
-      <div class="aktionen">
-        <button type="submit" class="${BP}">Speichern</button>
-        <button type="button" onclick="closeModal()" class="${BS}">Abbrechen</button>
-      </div>
-    </form>`);
-};
-
-window.submitEditTimeEntry = async function(e, eid, taskId) {
-  e.preventDefault();
-  try {
-    await api('PUT', '/api/timeentries/' + eid, _timeEntryPayload());
-    showToast('Zeiteintrag aktualisiert.', 'success');
-    closeModal();
-    await renderAufgabeDetail(taskId);
-  } catch (err) { showError(err.message); }
-};
-
-window.deleteTimeEntry = async function(eid, taskId) {
-  if (!confirm('Zeiteintrag löschen?')) return;
-  try {
-    await api('DELETE', '/api/timeentries/' + eid);
-    showToast('Zeiteintrag gelöscht.', 'success');
-    await renderAufgabeDetail(taskId);
-  } catch(err) { showError(err.message); }
-};
-
-// ============================================================
-// MATERIAL MODALS
-// ============================================================
-
-let _matBilled = 1;
-
-const UNIT_DATALIST = `<datalist id="unit-dl">
-  <option value="Stk"><option value="m²"><option value="m³"><option value="m">
-  <option value="kg"><option value="t"><option value="l"><option value="Pkg"><option value="Rl">
-</datalist>`;
-
-window.openNeuMaterial = function(taskId) {
-  _matBilled = 1;
-  openModal(`${modalHeader('Materialposition hinzufügen')}
-    <form onsubmit="submitNeuMaterial(event,${taskId})" class="box-inhalt">
-      ${formRow('Bezeichnung *', `<input id="mf-mn-name" required placeholder="z.B. Ziegelsteine">`)}
-      <div class="grid2">
-        ${formRow('Menge *', `<input id="mf-mn-qty" type="number" step="0.001" min="0" required placeholder="z.B. 100">`)}
-        ${formRow('Einheit', `<input id="mf-mn-unit" placeholder="Stk, m², kg …" list="unit-dl">${UNIT_DATALIST}`)}
-      </div>
-      ${formRow('Einzelpreis (€) *', `<input id="mf-mn-price" type="number" step="0.01" min="0" required placeholder="z.B. 0.50">`)}
-      ${formRow('Rechnungs-Flag', billedToggleHTML(1,'setMatBilled'))}
-      <div class="aktionen">
-        <button type="submit" class="${BP}">Speichern</button>
-        <button type="button" onclick="closeModal()" class="${BS}">Abbrechen</button>
-      </div>
-    </form>`);
-};
-
-window.setMatBilled = function(val) { _matBilled = val; updateBilledToggle(val); };
-
-window.submitNeuMaterial = async function(e, taskId) {
-  e.preventDefault();
-  try {
-    await api('POST', '/api/tasks/' + taskId + '/materials', {
-      name:       document.getElementById('mf-mn-name').value.trim(),
-      qty:        parseFloat(document.getElementById('mf-mn-qty').value),
-      unit:       document.getElementById('mf-mn-unit').value.trim() || null,
-      unit_price: parseFloat(document.getElementById('mf-mn-price').value),
-      billed:     _matBilled,
-    });
-    showToast('Material gespeichert.', 'success');
-    closeModal();
-    await renderAufgabeDetail(taskId);
-  } catch(err) { showError(err.message); }
-};
-
-window.openEditMaterial = async function(mid, taskId) {
-  const d = await api('GET', '/api/tasks/' + taskId + '/materials');
-  const m = (d.materials||[]).find(m => m.id === mid);
-  if (!m) { showError('Position nicht gefunden.'); return; }
-  _matBilled = m.billed;
-  openModal(`${modalHeader('Materialposition bearbeiten')}
-    <form onsubmit="submitEditMaterial(event,${mid},${taskId})" class="box-inhalt">
-      ${formRow('Bezeichnung *', `<input id="mf-me-name" required value="${esc(m.name)}">`)}
-      <div class="grid2">
-        ${formRow('Menge *', `<input id="mf-me-qty" type="number" step="0.001" min="0" required value="${m.qty}">`)}
-        ${formRow('Einheit', `<input id="mf-me-unit" value="${esc(m.unit||'')}" list="unit-dl2">
-          <datalist id="unit-dl2"><option value="Stk"><option value="m²"><option value="m"><option value="kg"><option value="l"></datalist>`)}
-      </div>
-      ${formRow('Einzelpreis (€) *', `<input id="mf-me-price" type="number" step="0.01" min="0" required value="${m.unit_price}">`)}
-      ${formRow('Rechnungs-Flag', billedToggleHTML(m.billed,'setMatBilled'))}
-      <div class="aktionen">
-        <button type="submit" class="${BP}">Speichern</button>
-        <button type="button" onclick="closeModal()" class="${BS}">Abbrechen</button>
-      </div>
-    </form>`);
-};
-
-window.submitEditMaterial = async function(e, mid, taskId) {
-  e.preventDefault();
-  try {
-    await api('PUT', '/api/materials/' + mid, {
-      name:       document.getElementById('mf-me-name').value.trim(),
-      qty:        parseFloat(document.getElementById('mf-me-qty').value),
-      unit:       document.getElementById('mf-me-unit').value.trim() || null,
-      unit_price: parseFloat(document.getElementById('mf-me-price').value),
-      billed:     _matBilled,
-    });
-    showToast('Material aktualisiert.', 'success');
-    closeModal();
-    await renderAufgabeDetail(taskId);
-  } catch(err) { showError(err.message); }
-};
-
-window.deleteMaterial = async function(mid, taskId) {
-  if (!confirm('Materialposition löschen?')) return;
-  try {
-    await api('DELETE', '/api/materials/' + mid);
-    showToast('Materialposition gelöscht.', 'success');
-    await renderAufgabeDetail(taskId);
-  } catch(err) { showError(err.message); }
-};
+function summen(liste) {
+  // arbeit = Stundenlohn inkl. Anfahrt; anfahrt zusätzlich einzeln für die Anzeige
+  const s = { gesamt: 0, arbeit: 0, anfahrt: 0, material: 0, stunden: 0, offen: 0, bezahlt: 0, mit: 0, ohne: 0 };
+  liste.forEach(e => {
+    s.gesamt += e.betrag;
+    if (e.art === 'zeit') { s.arbeit += e.betrag; s.stunden += e.roh.hours; s.anfahrt += e.anfahrt; }
+    else s.material += e.betrag;
+    s.bezahlt += e.gezahlt; s.offen += e.betrag - e.gezahlt;
+    if (e.billed) s.mit += e.betrag; else s.ohne += e.betrag;
+  });
+  Object.keys(s).forEach(k => { s[k] = r2(s[k]); });
+  return s;
+}
 
 // ============================================================
-// DOKUMENT-UPLOAD MODAL
+// PROJEKTSEITE
 // ============================================================
+async function zeigeProjekt(pid, tab) {
+  if (!['logbuch', 'aufgaben', 'belege', 'auswertung'].includes(tab)) tab = 'logbuch';
+  if (!P || P.pid !== pid) {
+    $('#view').innerHTML = '<div class="leer">Projekt wird geladen…</div>';
+    P = null;
+    await ladeProjekt(pid);
+  }
+  P.tab = tab;
+  zeichneProjekt();
+}
 
-window.openUploadModal = function(taskId, materialId) {
-  openModal(`${modalHeader('Dokument / Foto hochladen')}
-    <form onsubmit="submitUpload(event,${taskId!=null?taskId:'null'},${materialId!=null?materialId:'null'})" class="box-inhalt">
-      ${formRow('Datei * (Bild oder PDF, max. 20 MB)',
-        `<input id="mf-ul-file" type="file" accept="image/*,.pdf" capture="environment" required>`)}
-      ${formRow('Typ', `<select id="mf-ul-type" class="${SC}">
-        <option value="beleg">Beleg</option>
-        <option value="rechnung">Rechnung</option>
-        <option value="foto">Foto</option>
-      </select>`)}
-      <div class="aktionen">
-        <button type="submit" class="${BP}">Hochladen</button>
-        <button type="button" onclick="closeModal()" class="${BS}">Abbrechen</button>
+function zeichneProjekt() {
+  document.body.classList.add('mit-leiste');
+  const alle = eintraege();
+  const s = summen(alle);
+  const adresse = P.sites.length === 1 ? P.sites[0].address : null;
+  const nAufg = aufgabenSortiert().length;
+  const nDocs = P.docs.filter(docImBereich).length;
+  const tabLink = (id, text, n) =>
+    `<a href="#/p/${P.pid}/${id}" class="${P.tab === id ? 'aktiv' : ''}">${text}${n != null ? `<span>${n}</span>` : ''}</a>`;
+
+  $('#view').innerHTML = `
+    <a href="#/" class="zurueck">← Alle Projekte</a>
+    <div class="pkopf">
+      <div>
+        <h1>${esc(P.project.name)}</h1>
+        ${P.project.note && P.project.note !== P.project.name ? `<div class="muted">${esc(P.project.note)}</div>` : ''}
+        ${adresse ? `<div class="muted">${esc(adresse)}</div>` : ''}
       </div>
-    </form>`);
-};
-
-window.submitUpload = async function(e, taskId, materialId) {
-  e.preventDefault();
-  const fi = document.getElementById('mf-ul-file');
-  if (!fi.files.length) { showError('Keine Datei ausgewählt.'); return; }
-  const fd = new FormData();
-  fd.append('file', fi.files[0]);
-  fd.append('doc_type', document.getElementById('mf-ul-type').value);
-  if (taskId !== null && taskId !== 'null') fd.append('task_id', String(taskId));
-  if (materialId !== null && materialId !== 'null') fd.append('material_id', String(materialId));
-  try {
-    await apiUpload('/api/documents', fd);
-    showToast('Dokument hochgeladen.', 'success');
-    closeModal();
-    const hash = window.location.hash;
-    if (hash.startsWith('#/aufgabe/')) {
-      await renderAufgabeDetail(parseInt(hash.split('/')[2]));
-    } else {
-      render();
-    }
-  } catch(err) { showError(err.message); }
-};
-
-window.deleteDoc = async function(docId, taskId) {
-  if (!confirm('Dokument löschen?')) return;
-  try {
-    await api('DELETE', '/api/documents/' + docId);
-    showToast('Dokument gelöscht.', 'success');
-    if (taskId) await renderAufgabeDetail(taskId);
-    else render();
-  } catch(err) { showError(err.message); }
-};
-
-window.sendToPaperless = async function(docId, taskId) {
-  try {
-    showToast('Wird an Paperless gesendet…');
-    await api('POST', '/api/documents/' + docId + '/paperless');
-    showToast('An Paperless gesendet.', 'success');
-    if (taskId) await renderAufgabeDetail(taskId);
-    else render();
-  } catch(err) { showError(err.message); }
-};
-
-// ============================================================
-// VIEW: DOKUMENTE (#/baustelle/<sid>/dokumente)
-// ============================================================
-
-async function renderDokumente(sid) {
-  const view = document.getElementById('view');
-  view.innerHTML = loadingSpinner();
-
-  const qs = window.location.hash.includes('?') ? window.location.hash.split('?')[1] : '';
-  const filterType = new URLSearchParams(qs).get('type') || '';
-
-  let apiPath = '/api/documents?site_id=' + sid;
-  if (filterType) apiPath += '&doc_type=' + encodeURIComponent(filterType);
-
-  const [siteData, docsData] = await Promise.all([
-    api('GET', '/api/sites/' + sid),
-    api('GET', apiPath),
-  ]);
-  const site = siteData.site;
-  const docs = docsData.documents || [];
-
-  const typeFilter = `<div class="aktionen">
-    ${['','rechnung','beleg','foto'].map(t => `
-      <button onclick="dokTypeFilter(${sid},'${t}')"
-        class="${filterType===t ? 'btn klein' : 'btn hell klein'}">
-        ${t || 'Alle'}
-      </button>`).join('')}
-  </div>`;
-
-  const gallery = docs.length === 0
-    ? emptyState('Keine Dokumente gefunden.')
-    : `<div class="galerie">
-        ${docs.map(d => {
-          const isImg = d.mime && d.mime.startsWith('image/');
-          const thumb = isImg
-            ? `<img src="/api/documents/${d.id}/file" alt="${esc(d.filename)}" loading="lazy" class="thumb">`
-            : `<div class="thumb">PDF</div>`;
-          const plBtn = d.paperless_url
-            ? `<a href="${esc(d.paperless_url)}" target="_blank" rel="noopener" class="badge mit">✓ Paperless</a>`
-            : (State.paperlessEnabled ? `<button onclick="sendToPaperless(${d.id},null)" class="btn-link">→ Paperless</button>` : '');
-          return `<div style="position:relative;">
-            <a href="/api/documents/${d.id}/file" target="_blank" rel="noopener">${thumb}</a>
-            <p class="muted" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${esc(d.filename)}">${esc(d.filename)}</p>
-            <div style="display:flex; flex-wrap:wrap; gap:4px; align-items:center;">
-              <span class="badge">${esc(d.doc_type||'')}</span>
-              ${d.task_id ? `<a href="#/aufgabe/${d.task_id}" class="link">Aufgabe #${d.task_id}</a>` : ''}
-              ${plBtn}
-            </div>
-            <button onclick="deleteDocSite(${d.id},${sid})"
-              class="btn rot klein" style="position:absolute; top:4px; right:4px;" aria-label="Löschen">✕</button>
-          </div>`;
-        }).join('')}
-      </div>`;
-
-  view.innerHTML = `
-    ${breadcrumb([{label:'Baustellen',href:'#/baustellen'},{label:site.name,href:'#/baustelle/'+sid},{label:'Dokumente'}])}
-    <div class="seitenkopf">
-      <h1>Dokumente – ${esc(site.name)}</h1>
+      <button class="hell klein" onclick="formProjekt()">Bearbeiten</button>
     </div>
-    ${typeFilter}
-    <div class="box box-pad">${gallery}</div>`;
+
+    <div class="kpis">
+      <div class="kpi haupt"><div class="zahl">${euro(s.gesamt)}</div><div class="label">Kosten gesamt</div></div>
+      <div class="kpi"><div class="zahl">${euro(s.arbeit)}</div><div class="label">Arbeit · ${zahl(s.stunden)} Std.${s.anfahrt ? ` · inkl. ${euro(s.anfahrt)} Anfahrt` : ''}</div></div>
+      <div class="kpi"><div class="zahl">${euro(s.material)}</div><div class="label">Material &amp; Sonstiges</div></div>
+      <button class="kpi ${s.offen > 0 ? 'warn' : ''}" onclick="zeigeOffene()" title="Offene Posten anzeigen">
+        <div class="zahl">${euro(s.offen)}</div><div class="label">noch zu bezahlen</div></button>
+      <div class="kpi"><div class="zahl">${euro(s.ohne)}</div><div class="label">davon ohne Rechnung</div></div>
+    </div>
+
+    <div class="aktionsleiste">
+      <button onclick="formZeit()"><span class="plus">+</span> Stunden</button>
+      <button onclick="formMaterial()"><span class="plus">+</span> Material</button>
+      <button onclick="formBeleg()"><span class="plus">+</span> Foto/Beleg</button>
+      <button class="hell nur-desktop" onclick="formAufgabe()"><span class="plus">+</span> Aufgabe</button>
+    </div>
+
+    ${mehrereBereiche() ? `<div class="bereiche"><span class="muted">Bereich:</span>
+      <button class="chip ${!P.bereich ? 'an' : ''}" onclick="setzeBereich(null)">Alle</button>
+      ${P.sites.map(b => `<button class="chip ${P.bereich === b.id ? 'an' : ''}" onclick="setzeBereich(${b.id})">${esc(b.name)}</button>`).join('')}
+    </div>` : ''}
+
+    <nav class="ptabs">
+      ${tabLink('logbuch', 'Logbuch', alle.length)}
+      ${tabLink('aufgaben', 'Aufgaben', nAufg)}
+      ${tabLink('belege', 'Fotos &amp; Belege', nDocs)}
+      ${tabLink('auswertung', 'Auswertung')}
+    </nav>
+    <div id="tab-inhalt">${
+      P.tab === 'aufgaben' ? htmlAufgaben()
+      : P.tab === 'belege' ? htmlBelege()
+      : P.tab === 'auswertung' ? htmlAuswertung()
+      : htmlLogbuch(alle)
+    }</div>`;
 }
 
-window.dokTypeFilter = function(sid, type) {
-  window.location.hash = '#/baustelle/' + sid + '/dokumente' + (type ? '?type=' + type : '');
-};
+function setzeBereich(id) { P.bereich = id; P.filter.task = ''; zeichneProjekt(); }
 
-window.deleteDocSite = async function(docId, sid) {
-  if (!confirm('Dokument löschen?')) return;
-  try {
-    await api('DELETE', '/api/documents/' + docId);
-    showToast('Dokument gelöscht.', 'success');
-    await renderDokumente(sid);
-  } catch(err) { showError(err.message); }
-};
-
-// ============================================================
-// VIEW: DOKUMENTE GESAMT (#/dokumente)
-// ============================================================
-
-async function renderDokumenteGesamt() {
-  const view = document.getElementById('view');
-  view.innerHTML = `<h1>Dokumente</h1>
-    <p class="muted">Bitte eine Baustelle wählen:</p>`;
-  const data = await api('GET', '/api/sites');
-  const sites = data.sites || [];
-  if (!sites.length) { view.innerHTML += emptyState('Noch keine Baustellen angelegt.'); return; }
-  view.innerHTML += `<div class="box"><div class="box-inhalt">` + sites.map(s => `
-    <a href="#/baustelle/${s.id}/dokumente" class="zeile" style="display:block; text-decoration:none; color:inherit;">
-      <span class="link">${esc(s.name)}</span>
-      ${s.address ? `<div class="muted">${esc(s.address)}</div>` : ''}
-    </a>`).join('') + `</div></div>`;
+function zeigeOffene() {
+  P.filter = { task: '', art: '', zahlung: 'offen' };
+  if (P.tab === 'logbuch') zeichneProjekt();
+  else location.hash = `#/p/${P.pid}/logbuch`;
 }
 
-// ============================================================
-// INIT
-// ============================================================
+// ---------------- Logbuch ----------------
+function htmlLogbuch(alle) {
+  const f = P.filter;
+  const liste = alle.filter(e =>
+    (!f.task || String(e.task_id) === f.task) &&
+    (!f.art || e.art === f.art) &&
+    (!f.zahlung || (f.zahlung === 'offen' ? !e.paid : !!e.paid)));
+  const aufg = aufgabenSortiert();
+  const filterAktiv = f.task || f.art || f.zahlung;
 
-async function loadConfig() {
-  try {
-    const d = await api('GET', '/api/config');
-    State.paperlessEnabled = !!d.paperless_enabled;
-  } catch {}
-}
+  const filterHTML = alle.length ? `
+    <div class="filter">
+      <select onchange="setzeFilter('task', this.value)" aria-label="Aufgabe">
+        <option value="">Alle Aufgaben</option>
+        ${aufg.map(t => `<option value="${t.id}" ${f.task === String(t.id) ? 'selected' : ''}>${esc(aufgabeName(t.id))}</option>`).join('')}
+      </select>
+      <select onchange="setzeFilter('art', this.value)" aria-label="Art">
+        <option value="">Stunden &amp; Material</option>
+        <option value="zeit" ${f.art === 'zeit' ? 'selected' : ''}>Nur Stunden</option>
+        <option value="material" ${f.art === 'material' ? 'selected' : ''}>Nur Material</option>
+      </select>
+      <select onchange="setzeFilter('zahlung', this.value)" aria-label="Zahlung">
+        <option value="">Bezahlt &amp; offen</option>
+        <option value="offen" ${f.zahlung === 'offen' ? 'selected' : ''}>Nur offene</option>
+        <option value="bezahlt" ${f.zahlung === 'bezahlt' ? 'selected' : ''}>Nur bezahlte</option>
+      </select>
+    </div>` : '';
 
-async function loadGlobalCache() {
-  try {
-    const [pd, sd] = await Promise.all([api('GET','/api/projects'), api('GET','/api/sites')]);
-    State.projects = pd.projects || [];
-    State.sites    = sd.sites    || [];
-  } catch {}
-}
-
-window.addEventListener('hashchange', render);
-
-window.addEventListener('load', async () => {
-  await loadConfig();
-  loadGlobalCache();
-  if (!window.location.hash || window.location.hash === '#') {
-    window.location.hash = '#/';
-  } else {
-    render();
+  if (!alle.length) {
+    return `<div class="leer"><p>Noch nichts erfasst.</p>
+      <p class="muted">Tippe auf <b>+ Stunden</b> oder <b>+ Material</b>, um den ersten Eintrag anzulegen.</p></div>`;
   }
-});
+  if (!liste.length) {
+    return filterHTML + `<div class="leer"><p>Keine Einträge für diesen Filter.</p>
+      <button class="hell" onclick="filterZuruecksetzen()">Filter zurücksetzen</button></div>`;
+  }
+
+  const tage = [];
+  liste.forEach(e => {
+    let tag = tage[tage.length - 1];
+    if (!tag || tag.datum !== e.datum) { tag = { datum: e.datum, eintraege: [] }; tage.push(tag); }
+    tag.eintraege.push(e);
+  });
+  const s = summen(liste);
+
+  return filterHTML + (filterAktiv ? `<div class="seitenkopf">
+      <span class="muted">${liste.length} Einträge · ${euro(s.gesamt)}${f.zahlung !== 'bezahlt' ? ` · offen ${euro(s.offen)}` : ''}</span>
+      <button class="linkbtn" onclick="filterZuruecksetzen()">Filter zurücksetzen</button></div>` : '') +
+    tage.map(tag => `
+    <div class="tag">
+      <div class="tag-kopf"><span>${datumLang(tag.datum)}</span><span>${euro(summen(tag.eintraege).gesamt)}</span></div>
+      ${tag.eintraege.map(htmlEintrag).join('')}
+    </div>`).join('');
+}
+
+function htmlEintrag(e) {
+  let titel, detail;
+  if (e.art === 'zeit') {
+    titel = `<b>${esc(e.roh.person)}</b> · ${zahl(e.roh.hours)} Std.`;
+    detail = `${zahl(e.roh.hours)} × ${euro(e.roh.hourly_rate)}${e.anfahrt ? ` + ${euro(e.anfahrt)} Anfahrt` : ''}`;
+  } else {
+    titel = `<b>${esc(e.roh.name)}</b>`;
+    detail = `${zahl(e.roh.qty)} ${esc(e.roh.unit || '')} × ${euro(e.roh.unit_price)}`;
+  }
+  // Die Aufgabe nur nennen, wenn es mehr als eine gibt — sonst ist sie in jeder Zeile gleich
+  const unter = [P.tasks.length > 1 ? esc(aufgabeName(e.task_id)) : '', detail,
+    e.billed ? '' : '<span style="color:var(--red)">ohne Rechnung</span>']
+    .filter(Boolean).join(' · ');
+  return `<div class="eintrag">
+    <button class="e-haupt" onclick="${e.art === 'zeit' ? 'formZeit' : 'formMaterial'}(${e.id})">
+      <span class="e-typ ${e.art}">${e.art === 'zeit' ? 'Std' : 'Mat'}</span>
+      <span class="e-text">${titel}<small>${unter}</small></span>
+      <span class="e-betrag">${euro(e.betrag)}</span>
+    </button>
+    <button class="zahlung ${e.paid ? 'bezahlt' : (e.gezahlt > 0 ? 'teil' : 'offen')}" onclick="umschaltenBezahlt('${e.art}', ${e.id})"
+      title="${e.paid ? 'Bezahlt – antippen, um wieder auf offen zu setzen' : (e.gezahlt > 0 ? 'Teilweise bezahlt – antippen für komplett bezahlt' : 'Offen – antippen, wenn bezahlt')}">${e.paid ? '✓ bezahlt' : (e.gezahlt > 0 ? `<span>teilweise</span><span>${euro(e.gezahlt)}</span>` : 'offen')}</button>
+  </div>`;
+}
+
+function setzeFilter(k, v) { P.filter[k] = v; zeichneProjekt(); }
+function filterZuruecksetzen() { P.filter = { task: '', art: '', zahlung: '' }; zeichneProjekt(); }
+
+async function umschaltenBezahlt(art, id) {
+  const liste = art === 'zeit' ? P.zeiten : P.materialien;
+  const e = liste.find(x => x.id === id);
+  if (!e) return;
+  const neu = e.paid ? 0 : 1;
+  try {
+    await api('PUT', art === 'zeit' ? `/api/timeentries/${id}` : `/api/materials/${id}`, { paid: neu });
+    e.paid = neu; e.paid_amount = 0;
+    zeichneProjekt();
+    showToast(neu ? 'Als bezahlt markiert' : 'Wieder als offen markiert', 'success');
+  } catch (err) { showError(err.message); }
+}
+
+// ---------------- Aufgaben ----------------
+function htmlAufgaben() {
+  const liste = aufgabenSortiert();
+  const kopf = `<div class="seitenkopf">
+    <span class="muted">Aufgaben gliedern das Projekt, z. B. „Trockenbau Bad“ oder „Fenstertausch“.</span>
+    <button class="klein" onclick="formAufgabe()">+ Aufgabe</button></div>`;
+  if (!liste.length) {
+    return kopf + `<div class="leer"><p>Noch keine Aufgaben.</p>
+      <p class="muted">Eine Aufgabe entsteht auch automatisch, wenn du Stunden oder Material erfasst.</p></div>`;
+  }
+  return kopf + liste.map(t => {
+    const z = P.zeiten.filter(e => e.task_id === t.id);
+    const m = P.materialien.filter(e => e.task_id === t.id);
+    const std = r2(z.reduce((a, e) => a + e.hours, 0));
+    const tr = t.trade_id ? gewerk(t.trade_id) : null;
+    const stKlasse = t.status === 'in Arbeit' ? 'inarbeit' : t.status;
+    return `<div class="aufgabe ${t.status === 'fertig' ? 'fertig' : ''}">
+      <div class="a-text">
+        <div class="a-titel">${esc(t.title)}</div>
+        <div class="a-meta">
+          <button class="status ${stKlasse}" onclick="statusWeiter(${t.id})" title="Status weiterschalten">${esc(t.status)}</button>
+          ${tr ? `<span class="badge gewerk">${esc(tr.name)}</span>` : ''}
+          ${mehrereBereiche() ? `<span class="badge">${esc(bereich(t.site_id)?.name || '')}</span>` : ''}
+        </div>
+        ${t.description ? `<div class="muted">${esc(t.description)}</div>` : ''}
+        <div class="a-zahlen">${zahl(std)} Std. · ${m.length} Material-Posten</div>
+        <div class="a-akt">
+          <button class="linkbtn" onclick="aufgabeEintraege(${t.id})">Einträge ansehen →</button>
+          <button class="linkbtn" onclick="formAufgabe(${t.id})">Bearbeiten</button>
+        </div>
+      </div>
+      <div class="a-betrag">${euro(t.total_cost)}</div>
+    </div>`;
+  }).join('');
+}
+
+function aufgabeEintraege(id) {
+  P.filter = { task: String(id), art: '', zahlung: '' };
+  location.hash = `#/p/${P.pid}/logbuch`;
+}
+
+async function statusWeiter(id) {
+  const t = aufgabe(id);
+  const folge = ['offen', 'in Arbeit', 'fertig'];
+  const neu = folge[(folge.indexOf(t.status) + 1) % folge.length];
+  try {
+    await api('PUT', `/api/tasks/${id}`, { status: neu });
+    t.status = neu;
+    zeichneProjekt();
+  } catch (e) { showError(e.message); }
+}
+
+// ---------------- Fotos & Belege ----------------
+const DOC_TYPEN = { foto: 'Foto', beleg: 'Beleg', rechnung: 'Rechnung' };
+
+function htmlBelege() {
+  const docs = P.docs.filter(docImBereich);
+  const kopf = `<div class="seitenkopf"><span class="muted">${docs.length} Dateien</span>
+    <button class="klein" onclick="formBeleg()">+ Foto / Beleg</button></div>`;
+  if (!docs.length) {
+    return kopf + `<div class="leer"><p>Noch keine Fotos oder Belege.</p>
+      <p class="muted">Lade Baustellenfotos, Kassenbons oder Rechnungen (JPG, PNG, PDF) hoch.</p></div>`;
+  }
+  return kopf + `<div class="galerie">${docs.map(d => {
+    const bild = (d.mime || '').startsWith('image/');
+    const mat = d.material_id ? P.materialien.find(m => m.id === d.material_id) : null;
+    const zu = mat ? 'Material: ' + mat.name : aufgabeName(docTaskId(d));
+    const datei = `/api/documents/${d.id}/file`;
+    return `<div class="doc">
+      <a class="doc-bild" href="${datei}" target="_blank" rel="noopener">
+        ${bild ? `<img src="${datei}" alt="" loading="lazy" onerror="this.replaceWith('Bild fehlt')">` : 'PDF'}</a>
+      <div class="doc-info">
+        <div class="doc-name">${esc(d.filename)}</div>
+        <div class="muted">${DOC_TYPEN[d.doc_type] || esc(d.doc_type || '')} · ${datumKurz(lokalesDatum(d.created_at))}</div>
+        <div class="muted">${esc(zu)}</div>
+        <div class="doc-akt">
+          ${d.paperless_url ? `<a href="${esc(d.paperless_url)}" target="_blank" rel="noopener">In Paperless</a>`
+            : App.paperless ? `<button class="linkbtn" onclick="anPaperless(${d.id}, this)">An Paperless</button>` : ''}
+          <button class="linkbtn rot-link" onclick="loescheDoc(${d.id})">Löschen</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('')}</div>`;
+}
+
+async function anPaperless(id, knopf) {
+  knopf.disabled = true;
+  knopf.textContent = 'Wird gesendet…';
+  try {
+    await api('POST', `/api/documents/${id}/paperless`);
+    showToast('An Paperless übertragen', 'success');
+    await neuLaden();
+  } catch (e) {
+    showError(e.message);
+    knopf.disabled = false;
+    knopf.textContent = 'An Paperless';
+  }
+}
+
+function loescheDoc(id) {
+  const d = P.docs.find(x => x.id === id);
+  bestaetigen('Datei löschen?', `„${esc(d.filename)}“ wird dauerhaft gelöscht.`, 'Löschen', async () => {
+    await api('DELETE', `/api/documents/${id}`);
+    closeModal();
+    showToast('Datei gelöscht', 'success');
+    await neuLaden();
+  });
+}
+
+// ---------------- Auswertung ----------------
+function htmlAuswertung() {
+  const alle = eintraege();
+  if (!alle.length) return `<div class="leer"><p>Noch keine Kosten erfasst.</p></div>`;
+  const z = alle.filter(e => e.art === 'zeit');
+  const m = alle.filter(e => e.art === 'material');
+  const sz = summen(z), sm = summen(m), sg = summen(alle);
+  // Stundenlohn und Anfahrt in der Kostentabelle getrennt ausweisen
+  const sl = summen(z.map(e => ({ ...e, betrag: r2(e.betrag - e.anfahrt) })));
+  const sf = summen(z.filter(e => e.anfahrt).map(e => ({ ...e, betrag: e.anfahrt })));
+
+  // Nach Person
+  const personen = new Map();
+  z.forEach(e => {
+    const k = e.roh.person;
+    const p = personen.get(k) || { name: k, std: 0, anfahrt: 0, kosten: 0, offen: 0, offeneIds: [] };
+    p.std += e.roh.hours; p.anfahrt += e.anfahrt; p.kosten += e.betrag;
+    if (!e.paid) { p.offen += e.betrag - e.gezahlt; p.offeneIds.push(e.id); }
+    personen.set(k, p);
+  });
+  const pListe = [...personen.values()].sort((a, b) => b.kosten - a.kosten);
+  App.offeneJePerson = Object.fromEntries(pListe.map(p => [p.name, p.offeneIds]));
+
+  // Nach Aufgabe
+  const aMap = new Map();
+  alle.forEach(e => {
+    const a = aMap.get(e.task_id) || { id: e.task_id, arbeit: 0, material: 0, gesamt: 0 };
+    if (e.art === 'zeit') a.arbeit += e.betrag; else a.material += e.betrag;
+    a.gesamt += e.betrag;
+    aMap.set(e.task_id, a);
+  });
+  const aListe = [...aMap.values()].sort((a, b) => b.gesamt - a.gesamt);
+  const aMax = Math.max(...aListe.map(a => a.gesamt), 1);
+
+  // Nach Gewerk (nur wenn Gewerke gepflegt sind)
+  const gMap = new Map();
+  alle.forEach(e => {
+    const t = aufgabe(e.task_id);
+    const name = t && t.trade_id ? (gewerk(t.trade_id)?.name || '–') : 'ohne Gewerk';
+    gMap.set(name, (gMap.get(name) || 0) + e.betrag);
+  });
+  const gListe = [...gMap.entries()].sort((a, b) => b[1] - a[1]);
+  const zeigeGewerke = gListe.some(([n]) => n !== 'ohne Gewerk');
+
+  return `
+    <h2 style="margin-top:0">Kosten</h2>
+    <div class="scrollx"><table>
+      <tr><th></th><th class="r">mit Rechnung</th><th class="r">ohne Rechnung</th><th class="r">Summe</th></tr>
+      <tr><td>Arbeit (${zahl(sz.stunden)} Std.)</td><td class="r">${euro(sl.mit)}</td><td class="r">${euro(sl.ohne)}</td><td class="r">${euro(sl.gesamt)}</td></tr>
+      ${sf.gesamt ? `<tr><td>Anfahrt</td><td class="r">${euro(sf.mit)}</td><td class="r">${euro(sf.ohne)}</td><td class="r">${euro(sf.gesamt)}</td></tr>` : ''}
+      <tr><td>Material &amp; Sonstiges</td><td class="r">${euro(sm.mit)}</td><td class="r">${euro(sm.ohne)}</td><td class="r">${euro(sm.gesamt)}</td></tr>
+      <tr class="summenzeile"><td>Gesamt</td><td class="r">${euro(sg.mit)}</td><td class="r">${euro(sg.ohne)}</td><td class="r">${euro(sg.gesamt)}</td></tr>
+    </table></div>
+
+    <h2>Zahlungen</h2>
+    <div class="scrollx"><table>
+      <tr><th></th><th class="r">bezahlt</th><th class="r">noch offen</th></tr>
+      <tr><td>Arbeit${sf.gesamt ? ' inkl. Anfahrt' : ''}</td><td class="r">${euro(sz.bezahlt)}</td><td class="r">${euro(sz.offen)}</td></tr>
+      <tr><td>Material &amp; Sonstiges</td><td class="r">${euro(sm.bezahlt)}</td><td class="r">${euro(sm.offen)}</td></tr>
+      <tr class="summenzeile"><td>Gesamt</td><td class="r">${euro(sg.bezahlt)}</td><td class="r">${euro(sg.offen)}</td></tr>
+    </table></div>
+
+    ${pListe.length ? `<h2>Stunden je Person</h2>
+    <div class="scrollx"><table>
+      <tr><th>Person</th><th class="r">Stunden</th>${sf.gesamt ? '<th class="r">Anfahrt</th>' : ''}<th class="r">Kosten</th><th class="r">offen</th><th></th></tr>
+      ${pListe.map(p => `<tr><td>${esc(p.name)}</td><td class="r">${zahl(p.std)}</td>
+        ${sf.gesamt ? `<td class="r">${euro(p.anfahrt)}</td>` : ''}<td class="r">${euro(p.kosten)}</td>
+        <td class="r">${euro(p.offen)}</td>
+        <td class="r">${p.offeneIds.length ? `<button class="linkbtn" data-person="${esc(p.name)}" onclick="personAuszahlung(this.dataset.person)">auszahlen</button>` : '✓'}</td></tr>`).join('')}
+    </table></div>` : ''}
+
+    <h2>Kosten je Aufgabe</h2>
+    <div class="scrollx"><table>
+      <tr><th>Aufgabe</th><th class="r">Arbeit</th><th class="r">Material</th><th class="r">Gesamt</th></tr>
+      ${aListe.map(a => `<tr><td>${esc(aufgabeName(a.id))}
+          <div class="balken"><div style="width:${Math.round(a.gesamt / aMax * 100)}%"></div></div></td>
+        <td class="r">${euro(a.arbeit)}</td><td class="r">${euro(a.material)}</td><td class="r"><b>${euro(a.gesamt)}</b></td></tr>`).join('')}
+    </table></div>
+
+    ${zeigeGewerke ? `<h2>Kosten je Gewerk</h2>
+    <div class="scrollx"><table>
+      ${gListe.map(([n, v]) => `<tr><td>${esc(n)}</td><td class="r">${euro(v)}</td></tr>`).join('')}
+    </table></div>` : ''}`;
+}
+
+function personRestOffen(name) {
+  const ids = (App.offeneJePerson || {})[name] || [];
+  const liste = P.zeiten.filter(e => ids.includes(e.id));
+  const betrag = r2(liste.reduce((a, e) => a + e.hours * e.hourly_rate + (e.travel_cost || 0) - (e.paid_amount || 0), 0));
+  return { ids, betrag };
+}
+
+// (Teil-)Auszahlung: Betrag eingeben, wird auf die offenen Einträge verteilt (älteste zuerst)
+function personAuszahlung(name) {
+  const { ids, betrag } = personRestOffen(name);
+  openModal(`${modalKopf('Auszahlung an ' + name)}
+    <div class="modal-body">
+      <p>Offen: <b>${euro(betrag)}</b> in ${anzahl(ids.length, 'Eintrag', 'Einträgen')}.</p>
+      <label for="f-auszahlung">Ausgezahlter Betrag (€)</label>
+      <input id="f-auszahlung" inputmode="decimal" value="${zahlEin(betrag)}" autofocus>
+      <p class="hinweis" id="f-auszahlung-hinweis"></p>
+      <p class="hinweis">Der Betrag wird auf die offenen Tage verteilt – älteste zuerst. Ein Tag, der nur
+        zum Teil gedeckt ist, bleibt „teilweise bezahlt“.</p>
+    </div>
+    <div class="modal-fuss"><button class="hell" onclick="closeModal()">Abbrechen</button>
+      <span class="spacer"></span><button class="gruen" id="m-ja">Auszahlung verbuchen</button></div>`);
+  const hinweis = () => {
+    const v = parseZahl($('#f-auszahlung').value);
+    $('#f-auszahlung-hinweis').textContent = !(v > 0) ? '' :
+      v > betrag + 0.004 ? `Mehr als offen (${euro(betrag)}).` : `Danach noch offen: ${euro(r2(betrag - v))}`;
+  };
+  $('#f-auszahlung').oninput = hinweis;
+  hinweis();
+  $('#m-ja').onclick = () => mitSperre(async () => {
+    const v = parseZahl($('#f-auszahlung').value);
+    if (!(v > 0)) throw new Error('Bitte einen Betrag über 0 eintragen.');
+    if (v > betrag + 0.004) throw new Error(`Das ist mehr als offen (${euro(betrag)}).`);
+    const res = await api('POST', `/api/projects/${P.pid}/payout`, { person: name, amount: v });
+    closeModal();
+    showToast(`${euro(v)} an ${name} verbucht – noch offen ${euro(res.rest_offen)}`, 'success');
+    await neuLaden();
+  });
+}
+
+function personBezahlt(name) {
+  const { ids, betrag } = personRestOffen(name);
+  openModal(`${modalKopf('Als bezahlt markieren?')}
+    <div class="modal-body"><p>${anzahl(ids.length, 'offener Stunden-Eintrag', 'offene Stunden-Einträge')} von <b>${esc(name)}</b>
+      über <b>${euro(betrag)}</b> werden als bezahlt markiert.</p></div>
+    <div class="modal-fuss"><button class="hell" onclick="closeModal()">Abbrechen</button>
+      <span class="spacer"></span><button class="gruen" id="m-ja">Ja, alles bezahlt</button></div>`);
+  $('#m-ja').onclick = () => mitSperre(async () => {
+    for (const id of ids) await api('PUT', `/api/timeentries/${id}`, { paid: 1 });
+    closeModal();
+    showToast(`${ids.length} Einträge als bezahlt markiert`, 'success');
+    await neuLaden();
+  });
+}
+
+// ============================================================
+// AUSWAHL „AUFGABE“ (in den Erfassungs-Formularen)
+// ============================================================
+function aufgabenAuswahl(vorwahl) {
+  const liste = aufgabenSortiert();
+  const wahl = liste.some(t => String(t.id) === String(vorwahl)) ? String(vorwahl)
+    : (liste.length ? String(liste[0].id) : '__neu');
+  const bereichWahl = P.bereich || (P.sites[0] && P.sites[0].id);
+  return `<label for="f-task">Aufgabe</label>
+    <select id="f-task" onchange="$('#f-task-neu').classList.toggle('hidden', this.value !== '__neu')">
+      ${liste.map(t => `<option value="${t.id}" ${wahl === String(t.id) ? 'selected' : ''}>${esc(aufgabeName(t.id))}${t.status === 'fertig' ? ' (fertig)' : ''}</option>`).join('')}
+      <option value="__neu" ${wahl === '__neu' ? 'selected' : ''}>+ Neue Aufgabe anlegen …</option>
+    </select>
+    <div id="f-task-neu" class="unterfeld ${wahl === '__neu' ? '' : 'hidden'}">
+      <input id="f-task-titel" placeholder="Name der Aufgabe, z. B. Trockenbau Bad" value="${liste.length ? '' : 'Allgemein'}">
+      ${mehrereBereiche() ? `<select id="f-task-site">${P.sites.map(b =>
+        `<option value="${b.id}" ${b.id === bereichWahl ? 'selected' : ''}>Bereich: ${esc(b.name)}</option>`).join('')}</select>` : ''}
+    </div>`;
+}
+
+function aufgabeFest(taskId) {
+  return `<label>Aufgabe</label><div class="fix">${esc(aufgabeName(taskId))}</div>`;
+}
+
+// Liefert die Baustelle des Projekts; legt sie an, falls das Projekt (noch) keine hat.
+async function bereichId(gewaehlt) {
+  if (gewaehlt) return Number(gewaehlt);
+  if (P.bereich) return P.bereich;
+  if (P.sites.length) return P.sites[0].id;
+  const r = await api('POST', '/api/sites', { project_id: P.pid, name: P.project.name });
+  return r.id;
+}
+
+// Gewählte Aufgabe zurückgeben bzw. neue Aufgabe anlegen
+async function aufgabeAusAuswahl() {
+  const v = $('#f-task').value;
+  if (v !== '__neu') return Number(v);
+  const title = $('#f-task-titel').value.trim() || 'Allgemein';
+  const sid = await bereichId($('#f-task-site') ? $('#f-task-site').value : null);
+  const r = await api('POST', `/api/sites/${sid}/tasks`, { title, status: 'in Arbeit' });
+  return r.id;
+}
+
+// ============================================================
+// FORMULAR: STUNDEN
+// ============================================================
+function formZeit(id, vorgabe) {
+  const e = id ? P.zeiten.find(x => x.id === id) : null;
+  const merk = { ...gemerkt(), ...(vorgabe || {}) };
+  const personen = App.persons.filter(p => p.active || (e && e.person_id === p.id));
+
+  // Vorauswahl Person: beim Bearbeiten die eingetragene, sonst die zuletzt benutzte
+  // (gemerkt oder die des jüngsten Eintrags im Projekt)
+  let pWahl;
+  const juengster = P.zeiten.filter(x => x.person_id)
+    .sort((a, b) => (a.created_at < b.created_at ? 1 : -1))[0];
+  if (e) {
+    const perName = App.persons.find(p => p.name.toLowerCase() === e.person.toLowerCase());
+    pWahl = e.person_id ? String(e.person_id) : (perName ? String(perName.id) : '__text');
+  } else if (personen.some(p => String(p.id) === String(merk.person))) {
+    pWahl = String(merk.person);
+  } else if (juengster && personen.some(p => p.id === juengster.person_id)) {
+    pWahl = String(juengster.person_id);
+  } else {
+    pWahl = personen.length ? String(personen[0].id) : '__neu';
+  }
+  const pRate = (App.persons.find(p => String(p.id) === pWahl) || {}).hourly_rate;
+  const satz = e ? e.hourly_rate : (pRate || '');
+
+  openModal(`${modalKopf(e ? 'Stunden bearbeiten' : 'Stunden erfassen')}
+    <div class="modal-body">
+      <div class="grid2 umbruch">
+        <div><label for="f-datum">Datum</label>
+          <input type="date" id="f-datum" value="${e ? (e.work_date || '') : (merk.datum || heute())}"></div>
+        <div><label for="f-person">Wer?</label>
+          <select id="f-person" onchange="personGewechselt()">
+            ${personen.map(p => `<option value="${p.id}" ${pWahl === String(p.id) ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}
+            ${pWahl === '__text' ? `<option value="__text" selected>${esc(e.person)}</option>` : ''}
+            <option value="__neu" ${pWahl === '__neu' ? 'selected' : ''}>+ Neue Person …</option>
+          </select></div>
+      </div>
+      <div id="f-person-neu" class="unterfeld ${pWahl === '__neu' ? '' : 'hidden'}">
+        <input id="f-person-name" placeholder="Name der neuen Person">
+      </div>
+      <div class="grid2">
+        <div><label for="f-stunden">Stunden</label>
+          <input id="f-stunden" inputmode="decimal" placeholder="z. B. 6,5" value="${e ? zahlEin(e.hours) : ''}" oninput="zeitSumme()" autofocus></div>
+        <div><label for="f-satz">Stundensatz (€)</label>
+          <input id="f-satz" inputmode="decimal" placeholder="z. B. 20" value="${zahlEin(satz)}" oninput="zeitSumme()"></div>
+      </div>
+      <div class="grid2">
+        <div><label for="f-anfahrt">Anfahrt (€) · optional</label>
+          <input id="f-anfahrt" inputmode="decimal" placeholder="keine" value="${e && e.travel_cost ? zahlEin(e.travel_cost) : ''}" oninput="zeitSumme()"></div>
+        <div class="vorschlag" id="f-anfahrt-vorschlag"></div>
+      </div>
+      ${e ? aufgabeFest(e.task_id) : aufgabenAuswahl(merk.task)}
+      <label>Rechnung</label>${seg('billed', e ? e.billed : 1, [[1, 'Mit Rechnung'], [0, 'Ohne Rechnung']])}
+      ${zahlungsFeld(e)}
+      <div class="summe"><span>Betrag</span><b id="f-summe">–</b></div>
+    </div>
+    <div class="modal-fuss">
+      ${e ? `<button class="rot" onclick="loescheZeit(${e.id})">Löschen</button>` : ''}
+      <span class="spacer"></span>
+      ${e ? '' : `<button class="hell" onclick="speichereZeit(null, true)">Speichern + nächster</button>`}
+      <button onclick="speichereZeit(${e ? e.id : 'null'}, false)">Speichern</button>
+    </div>`);
+  anfahrtVorschlag();
+  zeitSumme();
+}
+
+// Letzter Anfahrt-Betrag der Person im Projekt — auch aus früheren
+// Materialposten „Anfahrt <Name>“, die vor dem Anfahrt-Feld so erfasst wurden.
+function letzteAnfahrt(personId) {
+  const neuester = liste => liste.sort((a, b) => (a.created_at < b.created_at ? 1 : -1))[0];
+  const z = neuester(P.zeiten.filter(x => String(x.person_id) === String(personId) && x.travel_cost > 0));
+  if (z) return z.travel_cost;
+  const p = App.persons.find(x => String(x.id) === String(personId));
+  if (!p) return null;
+  const m = neuester(P.materialien.filter(x => x.unit_price > 0 &&
+    x.name.toLowerCase().startsWith('anfahrt') && x.name.toLowerCase().includes(p.name.toLowerCase())));
+  return m ? m.unit_price : null;
+}
+
+function anfahrtVorschlag() {
+  const v = letzteAnfahrt($('#f-person').value);
+  $('#f-anfahrt-vorschlag').innerHTML = v
+    ? `<button type="button" class="chip" onclick="$('#f-anfahrt').value='${zahlEin(v)}'; zeitSumme()">wie zuletzt: ${euro(v)}</button>`
+    : '';
+}
+
+function personGewechselt() {
+  const v = $('#f-person').value;
+  $('#f-person-neu').classList.toggle('hidden', v !== '__neu');
+  const p = App.persons.find(x => String(x.id) === v);
+  if (p) $('#f-satz').value = p.hourly_rate ? zahlEin(p.hourly_rate) : '';
+  if (v === '__neu') { $('#f-satz').value = ''; $('#f-person-name').focus(); }
+  anfahrtVorschlag();
+  zeitSumme();
+}
+
+function zeitSumme() {
+  const h = parseZahl($('#f-stunden').value), s = parseZahl($('#f-satz').value);
+  const a = $('#f-anfahrt').value.trim() ? parseZahl($('#f-anfahrt').value) : 0;
+  $('#f-summe').textContent = (h > 0 && s >= 0 && a >= 0) ? euro(r2(h * s + a)) : '–';
+}
+
+async function personAnlegen(name, satz) {
+  name = (name || '').trim();
+  if (!name) throw new Error('Bitte den Namen der neuen Person eingeben.');
+  const da = App.persons.find(p => p.name.toLowerCase() === name.toLowerCase());
+  if (da) return da.id;
+  const r = await api('POST', '/api/persons', { name, hourly_rate: satz >= 0 ? satz : 0 });
+  await ladePersonen();
+  return r.id;
+}
+
+function speichereZeit(id, weiter) {
+  return mitSperre(async () => {
+    const hours = parseZahl($('#f-stunden').value);
+    if (!(hours > 0)) throw new Error('Bitte die Stunden eintragen (mehr als 0).');
+    const rate = parseZahl($('#f-satz').value);
+    if (!(rate >= 0)) throw new Error('Bitte einen Stundensatz eintragen (0 = unbezahlte Eigenleistung).');
+    const anfahrt = $('#f-anfahrt').value.trim() ? parseZahl($('#f-anfahrt').value) : 0;
+    if (!(anfahrt >= 0)) throw new Error('Bitte bei der Anfahrt einen Betrag eintragen oder das Feld leer lassen.');
+    const body = {
+      hours, hourly_rate: rate, travel_cost: anfahrt, billed: segWert('billed'), ...zahlungWerte(),
+      work_date: $('#f-datum').value || null,
+    };
+    const pv = $('#f-person').value;
+    if (pv === '__neu') body.person_id = await personAnlegen($('#f-person-name').value, rate);
+    else if (pv !== '__text') body.person_id = Number(pv);
+
+    if (id) {
+      await api('PUT', `/api/timeentries/${id}`, body);
+      closeModal();
+      showToast('Gespeichert', 'success');
+      await neuLaden();
+      return;
+    }
+    const taskId = await aufgabeAusAuswahl();
+    await api('POST', `/api/tasks/${taskId}/timeentries`, body);
+    merke({ task: String(taskId), person: String(body.person_id) });
+    await neuLaden();
+    if (weiter) {
+      formZeit(null, { task: String(taskId), datum: body.work_date || heute() });
+      showToast(`${zahl(hours)} Std. gespeichert – nächster Eintrag`, 'success');
+    } else {
+      closeModal();
+      showToast(`${zahl(hours)} Std. gespeichert`, 'success');
+    }
+  });
+}
+
+function loescheZeit(id) {
+  const e = P.zeiten.find(x => x.id === id);
+  bestaetigen('Eintrag löschen?',
+    `${esc(e.person)} · ${zahl(e.hours)} Std. (${euro(e.hours * e.hourly_rate + (e.travel_cost || 0))}) wird gelöscht.`, 'Löschen', async () => {
+      await api('DELETE', `/api/timeentries/${id}`);
+      closeModal();
+      showToast('Eintrag gelöscht', 'success');
+      await neuLaden();
+    });
+}
+
+// ============================================================
+// FORMULAR: MATERIAL
+// ============================================================
+function formMaterial(id, vorgabe) {
+  const m = id ? P.materialien.find(x => x.id === id) : null;
+  const merk = { ...gemerkt(), ...(vorgabe || {}) };
+  const docs = m ? P.docs.filter(d => d.material_id === m.id) : [];
+
+  openModal(`${modalKopf(m ? 'Material bearbeiten' : 'Material / Kosten erfassen')}
+    <div class="modal-body">
+      <label for="f-name">Was?</label>
+      <input id="f-name" value="${esc(m ? m.name : '')}" placeholder="z. B. Rigipsplatten, Spachtelmasse, Anfahrt" autofocus>
+      <div class="grid3">
+        <div><label for="f-menge">Menge</label>
+          <input id="f-menge" inputmode="decimal" value="${m ? zahlEin(m.qty) : '1'}" oninput="materialSumme()"></div>
+        <div><label for="f-einheit">Einheit</label>
+          <input id="f-einheit" list="einheiten" value="${esc(m ? (m.unit || '') : '')}" placeholder="Stk">
+          <datalist id="einheiten">${EINHEITEN.map(u => `<option value="${u}">`).join('')}</datalist></div>
+        <div><label for="f-preis">Preis je Einheit (€)</label>
+          <input id="f-preis" inputmode="decimal" value="${m ? zahlEin(m.unit_price) : ''}" placeholder="0,00" oninput="materialSumme()"></div>
+      </div>
+      ${m ? aufgabeFest(m.task_id) : aufgabenAuswahl(merk.task)}
+      <label>Rechnung</label>${seg('billed', m ? m.billed : 1, [[1, 'Mit Rechnung'], [0, 'Ohne Rechnung']])}
+      ${zahlungsFeld(m)}
+      <label for="f-datei">Beleg / Rechnung anhängen (optional)</label>
+      <input type="file" id="f-datei" accept="${ERLAUBTE_DATEIEN}">
+      ${docs.length ? `<p class="hinweis">Angehängt: ${docs.map(d =>
+        `<a href="/api/documents/${d.id}/file" target="_blank" rel="noopener">${esc(d.filename)}</a>`).join(', ')}</p>` : ''}
+      <div class="summe"><span>Betrag</span><b id="f-summe">–</b></div>
+    </div>
+    <div class="modal-fuss">
+      ${m ? `<button class="rot" onclick="loescheMaterial(${m.id})">Löschen</button>` : ''}
+      <span class="spacer"></span>
+      ${m ? '' : `<button class="hell" onclick="speichereMaterial(null, true)">Speichern + nächster</button>`}
+      <button onclick="speichereMaterial(${m ? m.id : 'null'}, false)">Speichern</button>
+    </div>`);
+  materialSumme();
+}
+
+function materialSumme() {
+  const q = parseZahl($('#f-menge').value), p = parseZahl($('#f-preis').value);
+  $('#f-summe').textContent = (q >= 0 && p >= 0) ? euro(r2(q * p)) : '–';
+}
+
+function speichereMaterial(id, weiter) {
+  return mitSperre(async () => {
+    const name = $('#f-name').value.trim();
+    if (!name) throw new Error('Bitte eintragen, was gekauft wurde.');
+    const qty = parseZahl($('#f-menge').value);
+    if (!(qty >= 0)) throw new Error('Bitte eine gültige Menge eintragen.');
+    const unit_price = parseZahl($('#f-preis').value);
+    if (!(unit_price >= 0)) throw new Error('Bitte einen Preis eintragen.');
+    const body = { name, qty, unit_price, unit: $('#f-einheit').value.trim() || null,
+                   billed: segWert('billed'), ...zahlungWerte() };
+    const datei = $('#f-datei').files[0];
+
+    let mid, taskId;
+    if (id) {
+      await api('PUT', `/api/materials/${id}`, body);
+      mid = id;
+      taskId = P.materialien.find(x => x.id === id).task_id;
+    } else {
+      taskId = await aufgabeAusAuswahl();
+      mid = (await api('POST', `/api/tasks/${taskId}/materials`, body)).id;
+      merke({ task: String(taskId) });
+    }
+    if (datei) {
+      const fd = new FormData();
+      fd.append('file', datei);
+      fd.append('material_id', mid);
+      fd.append('task_id', taskId);
+      fd.append('doc_type', body.billed ? 'rechnung' : 'beleg');
+      try { await apiUpload(fd); }
+      catch (e) { showError('Material gespeichert, aber Beleg nicht: ' + e.message); }
+    }
+    await neuLaden();
+    if (weiter) {
+      formMaterial(null, { task: String(taskId) });
+      showToast('Gespeichert – nächster Eintrag', 'success');
+    } else {
+      closeModal();
+      showToast('Gespeichert', 'success');
+    }
+  });
+}
+
+function loescheMaterial(id) {
+  const m = P.materialien.find(x => x.id === id);
+  const n = P.docs.filter(d => d.material_id === id).length;
+  bestaetigen('Material löschen?',
+    `„${esc(m.name)}“ (${euro(m.qty * m.unit_price)}) wird gelöscht${n ? ` – samt ${n} angehängtem Beleg` : ''}.`,
+    'Löschen', async () => {
+      await api('DELETE', `/api/materials/${id}`);
+      closeModal();
+      showToast('Material gelöscht', 'success');
+      await neuLaden();
+    });
+}
+
+// ============================================================
+// FORMULAR: FOTO / BELEG
+// ============================================================
+function formBeleg() {
+  const merk = gemerkt();
+  openModal(`${modalKopf('Foto / Beleg hochladen')}
+    <div class="modal-body">
+      <label for="f-dateien">Datei(en) auswählen oder Foto aufnehmen</label>
+      <input type="file" id="f-dateien" multiple accept="${ERLAUBTE_DATEIEN}">
+      <p class="hinweis">JPG, PNG, WebP oder PDF · max. 20 MB pro Datei</p>
+      <label>Art</label>${seg('doctype', 'foto', [['foto', 'Foto'], ['beleg', 'Beleg / Bon'], ['rechnung', 'Rechnung']])}
+      ${aufgabenAuswahl(merk.task)}
+    </div>
+    <div class="modal-fuss"><button class="hell" onclick="closeModal()">Abbrechen</button>
+      <span class="spacer"></span><button id="f-hochladen" onclick="speichereBeleg()">Hochladen</button></div>`);
+}
+
+function speichereBeleg() {
+  return mitSperre(async () => {
+    const dateien = [...$('#f-dateien').files];
+    if (!dateien.length) throw new Error('Bitte mindestens eine Datei auswählen.');
+    const typ = segWert('doctype');
+    const taskId = await aufgabeAusAuswahl();
+    merke({ task: String(taskId) });
+    const knopf = $('#f-hochladen');
+    let ok = 0;
+    const fehler = [];
+    for (const [i, datei] of dateien.entries()) {
+      knopf.textContent = `Lade ${i + 1} von ${dateien.length} …`;
+      const fd = new FormData();
+      fd.append('file', datei);
+      fd.append('task_id', taskId);
+      fd.append('doc_type', typ);
+      try { await apiUpload(fd); ok++; }
+      catch (e) { fehler.push(`${datei.name}: ${e.message}`); }
+    }
+    closeModal();
+    if (ok) showToast(`${ok} ${ok === 1 ? 'Datei' : 'Dateien'} hochgeladen`, 'success');
+    fehler.forEach(showError);
+    P.tab = 'belege';
+    if (location.hash !== `#/p/${P.pid}/belege`) location.hash = `#/p/${P.pid}/belege`;
+    await neuLaden();
+  });
+}
+
+// ============================================================
+// FORMULAR: AUFGABE
+// ============================================================
+function formAufgabe(id) {
+  const t = id ? aufgabe(id) : null;
+  const tr = t && t.trade_id ? gewerk(t.trade_id) : null;
+  const bekannte = new Set([...Object.values(P.trades).flat().map(x => x.name), ...GEWERK_VORSCHLAEGE]);
+  const bereichWahl = P.bereich || (P.sites[0] && P.sites[0].id);
+  const nZ = t ? P.zeiten.filter(e => e.task_id === t.id).length : 0;
+  const nM = t ? P.materialien.filter(e => e.task_id === t.id).length : 0;
+
+  openModal(`${modalKopf(t ? 'Aufgabe bearbeiten' : 'Neue Aufgabe')}
+    <div class="modal-body">
+      <label for="f-titel">Bezeichnung</label>
+      <input id="f-titel" value="${esc(t ? t.title : '')}" placeholder="z. B. Trockenbau Bad, Fenstertausch" autofocus>
+      ${!t && mehrereBereiche() ? `<label for="f-site">Bereich</label><select id="f-site">${P.sites.map(b =>
+        `<option value="${b.id}" ${b.id === bereichWahl ? 'selected' : ''}>${esc(b.name)}</option>`).join('')}</select>` : ''}
+      <label for="f-gewerk">Gewerk (optional)</label>
+      <input id="f-gewerk" list="gewerke" value="${esc(tr ? tr.name : '')}" placeholder="z. B. Trockenbau, Elektro, Maler">
+      <datalist id="gewerke">${[...bekannte].map(n => `<option value="${esc(n)}">`).join('')}</datalist>
+      <label>Status</label>${seg('status', t ? t.status : 'offen', [['offen', 'Offen'], ['in Arbeit', 'In Arbeit'], ['fertig', 'Fertig']])}
+      <label for="f-beschr">Notiz (optional)</label>
+      <textarea id="f-beschr">${esc(t ? (t.description || '') : '')}</textarea>
+      ${t && (nZ || nM) ? `<p class="hinweis">Enthält ${nZ} Stunden- und ${nM} Material-Einträge.</p>` : ''}
+    </div>
+    <div class="modal-fuss">
+      ${t ? `<button class="rot" onclick="loescheAufgabe(${t.id})">Löschen</button>` : ''}
+      <span class="spacer"></span>
+      <button class="hell" onclick="closeModal()">Abbrechen</button>
+      <button onclick="speichereAufgabe(${t ? t.id : 'null'})">Speichern</button>
+    </div>`);
+}
+
+// Gewerk über den Namen finden oder bei Bedarf in der Baustelle anlegen
+async function gewerkId(siteId, name) {
+  name = (name || '').trim();
+  if (!name) return null;
+  const da = (P.trades[siteId] || []).find(x => x.name.toLowerCase() === name.toLowerCase());
+  if (da) return da.id;
+  return (await api('POST', `/api/sites/${siteId}/trades`, { name })).id;
+}
+
+function speichereAufgabe(id) {
+  return mitSperre(async () => {
+    const title = $('#f-titel').value.trim();
+    if (!title) throw new Error('Bitte eine Bezeichnung eingeben.');
+    const t = id ? aufgabe(id) : null;
+    const siteId = t ? t.site_id : await bereichId($('#f-site') ? $('#f-site').value : null);
+    const body = {
+      title, status: segWert('status'),
+      description: $('#f-beschr').value.trim() || null,
+      trade_id: await gewerkId(siteId, $('#f-gewerk').value),
+    };
+    if (t) await api('PUT', `/api/tasks/${id}`, body);
+    else await api('POST', `/api/sites/${siteId}/tasks`, body);
+    closeModal();
+    showToast('Aufgabe gespeichert', 'success');
+    await neuLaden();
+  });
+}
+
+function loescheAufgabe(id) {
+  const t = aufgabe(id);
+  const nZ = P.zeiten.filter(e => e.task_id === id).length;
+  const nM = P.materialien.filter(e => e.task_id === id).length;
+  const nD = P.docs.filter(d => docTaskId(d) === id).length;
+  const teile = [nZ && anzahl(nZ, 'Stunden-Eintrag', 'Stunden-Einträgen'),
+    nM && anzahl(nM, 'Material-Eintrag', 'Material-Einträgen'),
+    nD && anzahl(nD, 'Foto/Beleg', 'Fotos/Belegen')].filter(Boolean);
+  bestaetigen('Aufgabe löschen?',
+    `„${esc(t.title)}“ wird gelöscht${teile.length ? ` – <b>mitsamt ${teile.join(', ')}</b>` : ''}. Das lässt sich nicht rückgängig machen.`,
+    'Endgültig löschen', async () => {
+      await api('DELETE', `/api/tasks/${id}`);
+      closeModal();
+      showToast('Aufgabe gelöscht', 'success');
+      if (P.filter.task === String(id)) P.filter.task = '';
+      await neuLaden();
+    });
+}
+
+// ============================================================
+// PROJEKT BEARBEITEN / BEREICHE
+// ============================================================
+function formProjekt() {
+  const einzig = P.sites.length === 1 ? P.sites[0] : null;
+  openModal(`${modalKopf('Projekt bearbeiten')}
+    <div class="modal-body">
+      <label for="f-name">Projektname</label>
+      <input id="f-name" value="${esc(P.project.name)}">
+      <label for="f-notiz">Beschreibung</label>
+      <textarea id="f-notiz">${esc(P.project.note || '')}</textarea>
+      ${einzig ? `<label for="f-adresse">Adresse</label>
+        <input id="f-adresse" value="${esc(einzig.address || '')}" placeholder="Straße, Ort">` : ''}
+      <details class="erweitert" ${mehrereBereiche() ? 'open' : ''}>
+        <summary>Bereiche / Baustellen (${P.sites.length})</summary>
+        <p class="hinweis">Nur nötig, wenn ein Projekt mehrere getrennte Baustellen hat
+          (z. B. „EG“ und „Dach“). Sonst einfach ignorieren.</p>
+        ${P.sites.map(b => `<div class="bereich-zeile">
+          <span>${esc(b.name)}${b.address ? ` <span class="muted">· ${esc(b.address)}</span>` : ''}</span>
+          <button class="hell klein" onclick="formBereich(${b.id})">Ändern</button></div>`).join('')}
+        <p><button class="hell klein" onclick="formBereich()">+ Bereich hinzufügen</button></p>
+      </details>
+    </div>
+    <div class="modal-fuss">
+      <button class="rot" onclick="loescheProjekt()">Projekt löschen</button>
+      <span class="spacer"></span>
+      <button class="hell" onclick="closeModal()">Abbrechen</button>
+      <button onclick="speichereProjekt()">Speichern</button>
+    </div>`);
+}
+
+function speichereProjekt() {
+  return mitSperre(async () => {
+    const name = $('#f-name').value.trim();
+    if (!name) throw new Error('Bitte einen Projektnamen eingeben.');
+    const alterName = P.project.name;
+    await api('PUT', `/api/projects/${P.pid}`, { name, note: $('#f-notiz').value.trim() || null });
+    const einzig = P.sites.length === 1 ? P.sites[0] : null;
+    if (einzig) {
+      const felder = { address: $('#f-adresse').value.trim() || null };
+      // Die Hintergrund-Baustelle heißt wie das Projekt — beim Umbenennen mitziehen
+      if (einzig.name === alterName && name !== alterName) felder.name = name;
+      await api('PUT', `/api/sites/${einzig.id}`, felder);
+    }
+    closeModal();
+    showToast('Projekt gespeichert', 'success');
+    await neuLaden();
+  });
+}
+
+function loescheProjekt() {
+  const teile = [
+    P.tasks.length && anzahl(P.tasks.length, 'Aufgabe', 'Aufgaben'),
+    P.zeiten.length && anzahl(P.zeiten.length, 'Stunden-Eintrag', 'Stunden-Einträgen'),
+    P.materialien.length && anzahl(P.materialien.length, 'Material-Eintrag', 'Material-Einträgen'),
+    P.docs.length && anzahl(P.docs.length, 'Foto/Beleg', 'Fotos/Belegen'),
+  ].filter(Boolean);
+  bestaetigen('Ganzes Projekt löschen?',
+    `Das Projekt „<b>${esc(P.project.name)}</b>“ wird gelöscht${teile.length ? ` – <b>mitsamt ${teile.join(', ')}</b>` : ''}.
+     Das lässt sich nicht rückgängig machen.`,
+    'Projekt endgültig löschen', async () => {
+      await api('DELETE', `/api/projects/${P.pid}`);
+      closeModal();
+      showToast('Projekt gelöscht', 'success');
+      location.hash = '#/';
+    });
+}
+
+function formBereich(id) {
+  const b = id ? bereich(id) : null;
+  openModal(`${modalKopf(b ? 'Bereich bearbeiten' : 'Neuer Bereich')}
+    <div class="modal-body">
+      <label for="f-bname">Name</label>
+      <input id="f-bname" value="${esc(b ? b.name : '')}" placeholder="z. B. Erdgeschoss, Dach, Garage" autofocus>
+      <label for="f-badresse">Adresse (optional)</label>
+      <input id="f-badresse" value="${esc(b ? (b.address || '') : '')}">
+      <label>Status</label>${seg('bstatus', b ? b.status : 'aktiv', [['aktiv', 'Aktiv'], ['abgeschlossen', 'Abgeschlossen']])}
+    </div>
+    <div class="modal-fuss">
+      ${b && P.sites.length > 1 ? `<button class="rot" onclick="loescheBereich(${b.id})">Löschen</button>` : ''}
+      <span class="spacer"></span>
+      <button class="hell" onclick="formProjekt()">Zurück</button>
+      <button onclick="speichereBereich(${b ? b.id : 'null'})">Speichern</button>
+    </div>`);
+}
+
+function speichereBereich(id) {
+  return mitSperre(async () => {
+    const name = $('#f-bname').value.trim();
+    if (!name) throw new Error('Bitte einen Namen eingeben.');
+    const body = { name, address: $('#f-badresse').value.trim() || null, status: segWert('bstatus') };
+    if (id) await api('PUT', `/api/sites/${id}`, body);
+    else await api('POST', '/api/sites', { ...body, project_id: P.pid });
+    await neuLaden();
+    formProjekt();
+    showToast('Bereich gespeichert', 'success');
+  });
+}
+
+function loescheBereich(id) {
+  const b = bereich(id);
+  const tids = P.tasks.filter(t => t.site_id === id).map(t => t.id);
+  const nZ = P.zeiten.filter(e => tids.includes(e.task_id)).length;
+  const nM = P.materialien.filter(e => tids.includes(e.task_id)).length;
+  bestaetigen('Bereich löschen?',
+    tids.length
+      ? `„${esc(b.name)}“ wird gelöscht – <b>mitsamt ${anzahl(tids.length, 'Aufgabe', 'Aufgaben')},
+         ${nZ} Stunden- und ${nM} Material-Einträgen</b>. Das lässt sich nicht rückgängig machen.`
+      : `„${esc(b.name)}“ wird gelöscht. Er enthält keine Einträge.`,
+    'Endgültig löschen', async () => {
+      await api('DELETE', `/api/sites/${id}`);
+      if (P.bereich === id) P.bereich = null;
+      closeModal();
+      showToast('Bereich gelöscht', 'success');
+      await neuLaden();
+    });
+}
+
+// ============================================================
+// PERSONEN
+// ============================================================
+async function zeigePersonen() {
+  P = null;
+  document.body.classList.remove('mit-leiste');
+  $('#view').innerHTML = '<div class="leer">Wird geladen…</div>';
+  await ladePersonen();
+  const liste = App.persons;
+  $('#view').innerHTML = `
+    <div class="listenkopf">
+      <div><h1>Personen</h1><div class="muted">Wer auf den Baustellen arbeitet – mit Stundensatz.</div></div>
+      <button onclick="formPerson()"><span class="plus">+</span> Neue Person</button>
+    </div>
+    ${liste.length ? liste.map(p => `
+      <div class="person ${p.active ? '' : 'inaktiv'}">
+        <div style="flex:1;min-width:0">
+          <b>${esc(p.name)}</b>${p.active ? '' : ' <span class="badge">inaktiv</span>'}
+          <div class="muted">${euro(p.hourly_rate)} / Std.${p.note ? ' · ' + esc(p.note) : ''}</div>
+          <div class="muted">${zahl(p.sum_hours)} Std. erfasst · ${euro(p.sum_cost)}</div>
+        </div>
+        <button class="hell klein" onclick="formPerson(${p.id})">Bearbeiten</button>
+      </div>`).join('')
+    : `<div class="leer"><p>Noch keine Personen.</p><button onclick="formPerson()">+ Person anlegen</button></div>`}`;
+}
+
+function formPerson(id) {
+  const p = id ? App.persons.find(x => x.id === id) : null;
+  openModal(`${modalKopf(p ? 'Person bearbeiten' : 'Neue Person')}
+    <div class="modal-body">
+      <label for="f-pname">Name</label>
+      <input id="f-pname" value="${esc(p ? p.name : '')}" autofocus>
+      <label for="f-psatz">Stundensatz (€)</label>
+      <input id="f-psatz" inputmode="decimal" value="${p ? zahlEin(p.hourly_rate) : ''}" placeholder="z. B. 20">
+      <label for="f-pnotiz">Notiz (optional)</label>
+      <input id="f-pnotiz" value="${esc(p ? (p.note || '') : '')}" placeholder="z. B. Externer Arbeiter">
+      ${p ? `<label>Status</label>${seg('aktiv', p.active, [[1, 'Aktiv'], [0, 'Inaktiv (nicht mehr auswählbar)']])}` : ''}
+    </div>
+    <div class="modal-fuss">
+      ${p ? `<button class="rot" onclick="loeschePerson(${p.id})">Löschen</button>` : ''}
+      <span class="spacer"></span>
+      <button class="hell" onclick="closeModal()">Abbrechen</button>
+      <button onclick="speicherePerson(${p ? p.id : 'null'})">Speichern</button>
+    </div>`);
+}
+
+function speicherePerson(id) {
+  return mitSperre(async () => {
+    const name = $('#f-pname').value.trim();
+    if (!name) throw new Error('Bitte einen Namen eingeben.');
+    const satz = $('#f-psatz').value.trim() ? parseZahl($('#f-psatz').value) : 0;
+    if (!(satz >= 0)) throw new Error('Bitte einen gültigen Stundensatz eingeben.');
+    const body = { name, hourly_rate: satz, note: $('#f-pnotiz').value.trim() || null };
+    if (id) await api('PUT', `/api/persons/${id}`, { ...body, active: segWert('aktiv') });
+    else await api('POST', '/api/persons', body);
+    closeModal();
+    showToast('Person gespeichert', 'success');
+    await zeigePersonen();
+  });
+}
+
+function loeschePerson(id) {
+  const p = App.persons.find(x => x.id === id);
+  if (p.entry_count > 0) {
+    showError(`${p.name} hat bereits Stunden-Einträge und kann nicht gelöscht werden. Stattdessen auf „Inaktiv“ setzen.`);
+    return;
+  }
+  bestaetigen('Person löschen?', `„${esc(p.name)}“ wird gelöscht.`, 'Löschen', async () => {
+    await api('DELETE', `/api/persons/${id}`);
+    closeModal();
+    showToast('Person gelöscht', 'success');
+    await zeigePersonen();
+  });
+}
+
+// ============================================================
+// START
+// ============================================================
+(async function start() {
+  try {
+    const [cfg] = await Promise.all([api('GET', '/api/config'), ladePersonen()]);
+    App.paperless = !!cfg.paperless_enabled;
+  } catch (e) { showError(e.message); }
+  route();
+})();
 </script>
 </body>
 </html>

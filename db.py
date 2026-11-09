@@ -32,7 +32,7 @@ def get_conn() -> sqlite3.Connection:
     return conn
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 4
 
 _INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_sites_project ON sites(project_id)",
@@ -215,6 +215,25 @@ def _migrate_v2(conn: sqlite3.Connection) -> None:
         conn.execute("PRAGMA user_version = 2")
 
 
+def _migrate_v3(conn: sqlite3.Connection) -> None:
+    """v2 → v3: Anfahrt 'travel_cost' (Euro, pauschal je Arbeitstag) für Zeiteinträge."""
+    with conn:
+        cols = [r["name"] for r in conn.execute("PRAGMA table_info(time_entries)")]
+        if "travel_cost" not in cols:
+            conn.execute("ALTER TABLE time_entries ADD COLUMN travel_cost REAL NOT NULL DEFAULT 0")
+        conn.execute("PRAGMA user_version = 3")
+
+
+def _migrate_v4(conn: sqlite3.Connection) -> None:
+    """v3 → v4: Teilzahlungen — 'paid_amount' (Euro bereits gezahlt, solange paid = 0)."""
+    with conn:
+        for table in ("time_entries", "materials"):
+            cols = [r["name"] for r in conn.execute(f"PRAGMA table_info({table})")]
+            if "paid_amount" not in cols:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN paid_amount REAL NOT NULL DEFAULT 0")
+        conn.execute("PRAGMA user_version = 4")
+
+
 def init_db() -> None:
     """Legt das Basis-Schema an und führt ausstehende Migrationen aus."""
     conn = get_conn()
@@ -227,6 +246,10 @@ def init_db() -> None:
             _migrate_v1(conn)
         if _user_version(conn) < 2:
             _migrate_v2(conn)
+        if _user_version(conn) < 3:
+            _migrate_v3(conn)
+        if _user_version(conn) < 4:
+            _migrate_v4(conn)
     conn.close()
 
 
@@ -240,8 +263,10 @@ _UPDATE_COLS = {
     "sites":        {"name", "address", "status", "note", "project_id"},
     "trades":       {"name"},
     "tasks":        {"title", "trade_id", "status", "description"},
-    "time_entries": {"person", "person_id", "hours", "hourly_rate", "billed", "paid", "work_date"},
-    "materials":    {"name", "qty", "unit", "unit_price", "billed", "paid"},
+    "time_entries": {"person", "person_id", "hours", "hourly_rate", "billed", "paid", "work_date",
+                     "travel_cost", "paid_amount"},
+    "materials":    {"name", "qty", "unit", "unit_price", "billed", "paid",
+                     "paid_amount"},
     "documents":    {"stored_path", "doc_type", "paperless_id", "paperless_url"},
     "persons":      {"name", "hourly_rate", "active", "note"},
 }
@@ -315,7 +340,7 @@ def list_projects(filters: dict | None = None) -> list[sqlite3.Row]:
                ROUND(COALESCE((SELECT SUM(ROUND(m.qty * m.unit_price, 2))
                          FROM materials m JOIN tasks t ON m.task_id = t.id
                          JOIN sites s ON t.site_id = s.id WHERE s.project_id = p.id), 0)
-             + COALESCE((SELECT SUM(ROUND(te.hours * te.hourly_rate, 2))
+             + COALESCE((SELECT SUM(ROUND(te.hours * te.hourly_rate + te.travel_cost, 2))
                          FROM time_entries te JOIN tasks t ON te.task_id = t.id
                          JOIN sites s ON t.site_id = s.id WHERE s.project_id = p.id), 0), 2)
                AS total_cost
@@ -395,7 +420,7 @@ def list_sites(filters: dict | None = None) -> list[sqlite3.Row]:
                ROUND(COALESCE((SELECT SUM(ROUND(m.qty * m.unit_price, 2))
                          FROM materials m JOIN tasks t ON m.task_id = t.id
                          WHERE t.site_id = s.id), 0)
-             + COALESCE((SELECT SUM(ROUND(te.hours * te.hourly_rate, 2))
+             + COALESCE((SELECT SUM(ROUND(te.hours * te.hourly_rate + te.travel_cost, 2))
                          FROM time_entries te JOIN tasks t ON te.task_id = t.id
                          WHERE t.site_id = s.id), 0), 2) AS total_cost,
                (SELECT COUNT(*) FROM tasks t WHERE t.site_id = s.id
@@ -478,7 +503,7 @@ def list_trades_with_stats(site_id: int) -> list[sqlite3.Row]:
                ROUND(COALESCE((SELECT SUM(ROUND(m.qty * m.unit_price, 2))
                          FROM materials m JOIN tasks t ON m.task_id = t.id
                          WHERE t.trade_id = tr.id), 0)
-             + COALESCE((SELECT SUM(ROUND(te.hours * te.hourly_rate, 2))
+             + COALESCE((SELECT SUM(ROUND(te.hours * te.hourly_rate + te.travel_cost, 2))
                          FROM time_entries te JOIN tasks t ON te.task_id = t.id
                          WHERE t.trade_id = tr.id), 0), 2) AS gesamt
         FROM trades tr
@@ -552,7 +577,7 @@ def list_persons(active_only: bool = False) -> list[sqlite3.Row]:
         SELECT p.*,
                COUNT(te.id)                              AS entry_count,
                ROUND(COALESCE(SUM(te.hours), 0), 2)      AS sum_hours,
-               ROUND(COALESCE(SUM(ROUND(te.hours * te.hourly_rate, 2)), 0), 2) AS sum_cost
+               ROUND(COALESCE(SUM(ROUND(te.hours * te.hourly_rate + te.travel_cost, 2)), 0), 2) AS sum_cost
         FROM persons p
         LEFT JOIN time_entries te ON te.person_id = p.id
         {where}
@@ -673,7 +698,7 @@ def list_tasks(filters: dict | None = None) -> list[sqlite3.Row]:
         SELECT t.*,
                ROUND(COALESCE((SELECT SUM(ROUND(m.qty * m.unit_price, 2)) FROM materials m
                          WHERE m.task_id = t.id), 0)
-             + COALESCE((SELECT SUM(ROUND(te.hours * te.hourly_rate, 2)) FROM time_entries te
+             + COALESCE((SELECT SUM(ROUND(te.hours * te.hourly_rate + te.travel_cost, 2)) FROM time_entries te
                          WHERE te.task_id = t.id), 0), 2) AS total_cost
         FROM tasks t
     """
@@ -720,11 +745,12 @@ def create_time_entry(
     work_date: str | None = None,
     person_id: int | None = None,
     paid: int = 0,
+    travel_cost: float = 0.0,
 ) -> int:
     """
     Legt einen Zeiteintrag (Personalkosten) an.
 
-    Kosten werden serverseitig als hours * hourly_rate berechnet.
+    Kosten werden serverseitig als hours * hourly_rate + travel_cost berechnet.
 
     :param task_id: ID der Aufgabe.
     :param person: Name der Person.
@@ -733,14 +759,17 @@ def create_time_entry(
     :param billed: 1 = mit Rechnung, 0 = ohne Rechnung (Standard: 1).
     :param work_date: Optionales Datum der Leistung (ISO YYYY-MM-DD).
     :param person_id: Optionale Verknüpfung mit einer Person.
+    :param travel_cost: Anfahrt in Euro für diesen Arbeitstag (Standard: 0).
     """
     conn = get_conn()
     with conn:
         cur = conn.execute(
             "INSERT INTO time_entries "
-            "(task_id, person, person_id, hours, hourly_rate, billed, paid, work_date, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (task_id, person, person_id, hours, hourly_rate, billed, paid, work_date, _now()),
+            "(task_id, person, person_id, hours, hourly_rate, billed, paid, work_date, "
+            "travel_cost, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (task_id, person, person_id, hours, hourly_rate, billed, paid, work_date,
+             travel_cost, _now()),
         )
     conn.close()
     return cur.lastrowid
@@ -779,6 +808,59 @@ def get_time_entry(entry_id: int) -> sqlite3.Row | None:
 def update_time_entry(entry_id: int, fields: dict) -> bool:
     """Aktualisiert die übergebenen Felder eines Zeiteintrags (person, person_id, hours, hourly_rate, billed, work_date); None leert das Feld."""
     return _update_row("time_entries", entry_id, fields)
+
+
+def person_auszahlung(project_id: int, person: str, amount: float) -> dict:
+    """
+    Verbucht eine (Teil-)Auszahlung an eine Person: Der Betrag wird auf die offenen
+    Stunden-Einträge der Person im Projekt verteilt — älteste Arbeitstage zuerst.
+    Voll gedeckte Einträge werden 'bezahlt', der letzte ggf. nur teilweise (paid_amount).
+
+    Alles in EINER Transaktion. Rückgabe:
+    {"verteilt": [{id, work_date, betrag, bisher, neu_gezahlt, bezahlt}], "rest_offen": float}
+    oder {"fehler": "..."}.
+    """
+    conn = get_conn()
+    try:
+        with conn:
+            rows = conn.execute(
+                "SELECT te.* FROM time_entries te "
+                "JOIN tasks t ON t.id = te.task_id JOIN sites s ON s.id = t.site_id "
+                "WHERE s.project_id = ? AND lower(te.person) = lower(?) AND te.paid = 0 "
+                "ORDER BY COALESCE(te.work_date, substr(te.created_at, 1, 10)), te.id",
+                (project_id, person.strip()),
+            ).fetchall()
+            if not rows:
+                return {"fehler": f"Keine offenen Stunden von '{person}' in Projekt {project_id}."}
+            posten = []
+            for r in rows:
+                betrag = round(r["hours"] * r["hourly_rate"] + (r["travel_cost"] or 0), 2)
+                offen = round(betrag - (r["paid_amount"] or 0), 2)
+                posten.append((r, betrag, offen))
+            gesamt_offen = round(sum(p[2] for p in posten), 2)
+            amount = round(amount, 2)
+            if amount > gesamt_offen + 0.004:
+                return {"fehler": f"Auszahlung {amount:.2f} € ist höher als der offene Betrag "
+                                  f"von {person}: {gesamt_offen:.2f} €."}
+            rest = amount
+            verteilt = []
+            for r, betrag, offen in posten:
+                if rest <= 0.004:
+                    break
+                anteil = round(min(rest, offen), 2)
+                neu = round((r["paid_amount"] or 0) + anteil, 2)
+                voll = neu >= betrag - 0.004
+                conn.execute(
+                    "UPDATE time_entries SET paid = ?, paid_amount = ? WHERE id = ?",
+                    (1 if voll else 0, 0 if voll else neu, r["id"]),
+                )
+                verteilt.append({"id": r["id"], "work_date": r["work_date"], "betrag": betrag,
+                                 "bisher": round(r["paid_amount"] or 0, 2), "anteil": anteil,
+                                 "bezahlt": voll, "gezahlt_gesamt": betrag if voll else neu})
+                rest = round(rest - anteil, 2)
+            return {"verteilt": verteilt, "rest_offen": round(gesamt_offen - amount, 2)}
+    finally:
+        conn.close()
 
 
 def delete_time_entry(entry_id: int) -> bool:
@@ -1044,8 +1126,8 @@ def _aggregate_costs(conn: sqlite3.Connection, site_filter: str, params: list) -
     # --- Personal-Summen ---
     pers_sql = f"""
         SELECT
-            ROUND(COALESCE(SUM(CASE WHEN te.billed = 1 THEN ROUND(te.hours * te.hourly_rate, 2) ELSE 0 END), 0), 2) AS pers_mit,
-            ROUND(COALESCE(SUM(CASE WHEN te.billed = 0 THEN ROUND(te.hours * te.hourly_rate, 2) ELSE 0 END), 0), 2) AS pers_ohne
+            ROUND(COALESCE(SUM(CASE WHEN te.billed = 1 THEN ROUND(te.hours * te.hourly_rate + te.travel_cost, 2) ELSE 0 END), 0), 2) AS pers_mit,
+            ROUND(COALESCE(SUM(CASE WHEN te.billed = 0 THEN ROUND(te.hours * te.hourly_rate + te.travel_cost, 2) ELSE 0 END), 0), 2) AS pers_ohne
         FROM time_entries te
         JOIN tasks t ON te.task_id = t.id
         WHERE {site_filter}
@@ -1087,8 +1169,8 @@ def _aggregate_costs(conn: sqlite3.Connection, site_filter: str, params: list) -
         SELECT
             t.trade_id,
             tr.name AS trade_name,
-            ROUND(COALESCE(SUM(CASE WHEN te.billed = 1 THEN ROUND(te.hours * te.hourly_rate, 2) ELSE 0 END), 0), 2) AS pers_mit,
-            ROUND(COALESCE(SUM(CASE WHEN te.billed = 0 THEN ROUND(te.hours * te.hourly_rate, 2) ELSE 0 END), 0), 2) AS pers_ohne
+            ROUND(COALESCE(SUM(CASE WHEN te.billed = 1 THEN ROUND(te.hours * te.hourly_rate + te.travel_cost, 2) ELSE 0 END), 0), 2) AS pers_mit,
+            ROUND(COALESCE(SUM(CASE WHEN te.billed = 0 THEN ROUND(te.hours * te.hourly_rate + te.travel_cost, 2) ELSE 0 END), 0), 2) AS pers_ohne
         FROM tasks t
         LEFT JOIN trades tr ON t.trade_id = tr.id
         JOIN time_entries te ON te.task_id = t.id
@@ -1230,8 +1312,8 @@ def dashboard_data(project_id: int | None = None, site_id: int | None = None) ->
                    FROM materials m JOIN tasks t ON m.task_id = t.id GROUP BY t.site_id) mat
                ON mat.sid = s.id
         LEFT JOIN (SELECT t.site_id sid,
-                          ROUND(SUM(CASE WHEN te.billed = 1 THEN ROUND(te.hours * te.hourly_rate, 2) ELSE 0 END), 2) mit,
-                          ROUND(SUM(CASE WHEN te.billed = 0 THEN ROUND(te.hours * te.hourly_rate, 2) ELSE 0 END), 2) ohne
+                          ROUND(SUM(CASE WHEN te.billed = 1 THEN ROUND(te.hours * te.hourly_rate + te.travel_cost, 2) ELSE 0 END), 2) mit,
+                          ROUND(SUM(CASE WHEN te.billed = 0 THEN ROUND(te.hours * te.hourly_rate + te.travel_cost, 2) ELSE 0 END), 2) ohne
                    FROM time_entries te JOIN tasks t ON te.task_id = t.id GROUP BY t.site_id) pers
                ON pers.sid = s.id
         WHERE (? IS NULL OR s.project_id = ?) AND (? IS NULL OR s.id = ?)
@@ -1242,9 +1324,9 @@ def dashboard_data(project_id: int | None = None, site_id: int | None = None) ->
         SELECT te.person_id,
                COALESCE(p.name, te.person) AS person_name,
                ROUND(SUM(te.hours), 2) AS stunden,
-               ROUND(SUM(ROUND(te.hours * te.hourly_rate, 2)), 2) AS kosten,
-               ROUND(SUM(CASE WHEN te.billed = 1 THEN ROUND(te.hours * te.hourly_rate, 2) ELSE 0 END), 2) AS kosten_mit,
-               ROUND(SUM(CASE WHEN te.billed = 0 THEN ROUND(te.hours * te.hourly_rate, 2) ELSE 0 END), 2) AS kosten_ohne
+               ROUND(SUM(ROUND(te.hours * te.hourly_rate + te.travel_cost, 2)), 2) AS kosten,
+               ROUND(SUM(CASE WHEN te.billed = 1 THEN ROUND(te.hours * te.hourly_rate + te.travel_cost, 2) ELSE 0 END), 2) AS kosten_mit,
+               ROUND(SUM(CASE WHEN te.billed = 0 THEN ROUND(te.hours * te.hourly_rate + te.travel_cost, 2) ELSE 0 END), 2) AS kosten_ohne
         FROM time_entries te
         JOIN tasks t ON te.task_id = t.id
         LEFT JOIN persons p ON te.person_id = p.id
@@ -1256,7 +1338,7 @@ def dashboard_data(project_id: int | None = None, site_id: int | None = None) ->
     recent = [dict(r) for r in conn.execute(f"""
         SELECT * FROM (
             SELECT 'zeit' AS typ, te.person || ' · ' || te.hours || ' h' AS label,
-                   te.hours * te.hourly_rate AS betrag, te.created_at AS datum,
+                   te.hours * te.hourly_rate + te.travel_cost AS betrag, te.created_at AS datum,
                    t.id AS task_id, t.title AS task_title
             FROM time_entries te JOIN tasks t ON te.task_id = t.id WHERE {scope}
             UNION ALL
