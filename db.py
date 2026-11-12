@@ -32,7 +32,7 @@ def get_conn() -> sqlite3.Connection:
     return conn
 
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 _INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_sites_project ON sites(project_id)",
@@ -234,6 +234,33 @@ def _migrate_v4(conn: sqlite3.Connection) -> None:
         conn.execute("PRAGMA user_version = 4")
 
 
+def _migrate_v5(conn: sqlite3.Connection) -> None:
+    """v4 → v5: Guthaben je Person/Projekt (Vorauszahlungen) + Verbrauch auf Zeiteinträge."""
+    with conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS guthaben (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                person     TEXT    NOT NULL,
+                betrag     REAL    NOT NULL,
+                notiz      TEXT,
+                created_at TEXT    NOT NULL
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS guthaben_verbrauch (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                guthaben_id   INTEGER NOT NULL REFERENCES guthaben(id) ON DELETE CASCADE,
+                time_entry_id INTEGER NOT NULL REFERENCES time_entries(id) ON DELETE CASCADE,
+                betrag        REAL    NOT NULL,
+                created_at    TEXT    NOT NULL
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_guthaben_person ON guthaben(project_id, person)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_gv_entry ON guthaben_verbrauch(time_entry_id)")
+        conn.execute("PRAGMA user_version = 5")
+
+
 def init_db() -> None:
     """Legt das Basis-Schema an und führt ausstehende Migrationen aus."""
     conn = get_conn()
@@ -250,6 +277,8 @@ def init_db() -> None:
             _migrate_v3(conn)
         if _user_version(conn) < 4:
             _migrate_v4(conn)
+        if _user_version(conn) < 5:
+            _migrate_v5(conn)
     conn.close()
 
 
@@ -771,8 +800,125 @@ def create_time_entry(
             (task_id, person, person_id, hours, hourly_rate, billed, paid, work_date,
              travel_cost, _now()),
         )
+        eid = cur.lastrowid
+        if not paid:
+            proj = conn.execute(
+                "SELECT s.project_id FROM tasks t JOIN sites s ON s.id = t.site_id "
+                "WHERE t.id = ?", (task_id,)
+            ).fetchone()
+            if proj:
+                _guthaben_verrechnen(conn, proj["project_id"], person)
     conn.close()
-    return cur.lastrowid
+    return eid
+
+
+def _guthaben_saldo_conn(conn: sqlite3.Connection, project_id: int, person: str) -> float:
+    """Verfügbares Guthaben = Einzahlungen minus bereits verbrauchter Betrag."""
+    row = conn.execute(
+        "SELECT ROUND(COALESCE((SELECT SUM(g.betrag) FROM guthaben g "
+        "WHERE g.project_id = ? AND lower(g.person) = lower(?)), 0) - "
+        "COALESCE((SELECT SUM(v.betrag) FROM guthaben_verbrauch v "
+        "JOIN guthaben g2 ON g2.id = v.guthaben_id "
+        "WHERE g2.project_id = ? AND lower(g2.person) = lower(?)), 0), 2) AS saldo",
+        (project_id, person.strip(), project_id, person.strip()),
+    ).fetchone()
+    return round(row["saldo"] or 0.0, 2)
+
+
+def _guthaben_verrechnen(conn: sqlite3.Connection, project_id: int, person: str) -> float:
+    """
+    Verrechnet vorhandenes Guthaben automatisch mit offenen Stunden der Person
+    (älteste Arbeitstage zuerst). Voll gedeckte Einträge werden 'bezahlt',
+    der letzte ggf. teilweise (paid_amount). Gibt den verrechneten Betrag zurück.
+    Läuft auf einer offenen Connection (Aufrufer committet).
+    """
+    saldo = _guthaben_saldo_conn(conn, project_id, person)
+    if saldo <= 0.004:
+        return 0.0
+    offene = conn.execute(
+        "SELECT te.* FROM time_entries te "
+        "JOIN tasks t ON t.id = te.task_id JOIN sites s ON s.id = t.site_id "
+        "WHERE s.project_id = ? AND lower(te.person) = lower(?) AND te.paid = 0 "
+        "ORDER BY COALESCE(te.work_date, substr(te.created_at, 1, 10)), te.id",
+        (project_id, person.strip()),
+    ).fetchall()
+    verrechnet = 0.0
+    for r in offene:
+        if saldo <= 0.004:
+            break
+        betrag = round(r["hours"] * r["hourly_rate"] + (r["travel_cost"] or 0), 2)
+        offen = round(betrag - (r["paid_amount"] or 0), 2)
+        take = round(min(saldo, offen), 2)
+        if take <= 0.004:
+            continue
+        # Guthaben-Töpfe FIFO abbuchen
+        rest = take
+        tops = conn.execute(
+            "SELECT g.id, g.betrag - COALESCE((SELECT SUM(v.betrag) FROM guthaben_verbrauch v "
+            "WHERE v.guthaben_id = g.id), 0) AS frei "
+            "FROM guthaben g WHERE g.project_id = ? AND lower(g.person) = lower(?) "
+            "ORDER BY g.created_at, g.id",
+            (project_id, person.strip()),
+        ).fetchall()
+        for top in tops:
+            if rest <= 0.004:
+                break
+            frei = round(top["frei"], 2)
+            if frei <= 0.004:
+                continue
+            abbuchen = round(min(rest, frei), 2)
+            conn.execute(
+                "INSERT INTO guthaben_verbrauch (guthaben_id, time_entry_id, betrag, created_at) "
+                "VALUES (?, ?, ?, ?)",
+                (top["id"], r["id"], abbuchen, _now()),
+            )
+            rest = round(rest - abbuchen, 2)
+        neu = round((r["paid_amount"] or 0) + take, 2)
+        voll = neu >= betrag - 0.004
+        conn.execute(
+            "UPDATE time_entries SET paid = ?, paid_amount = ? WHERE id = ?",
+            (1 if voll else 0, 0 if voll else neu, r["id"]),
+        )
+        saldo = round(saldo - take, 2)
+        verrechnet = round(verrechnet + take, 2)
+    return verrechnet
+
+
+def guthaben_einzahlen(project_id: int, person: str, betrag: float, notiz: str | None = None) -> dict:
+    """
+    Legt ein Guthaben (Vorauszahlung) für eine Person im Projekt an und verrechnet
+    es sofort mit offenen Stunden (älteste zuerst). Restguthaben bleibt erhalten
+    und wird bei künftigen Stunden automatisch verbraucht.
+    Rückgabe: {"verrechnet": float, "saldo": float}
+    """
+    conn = get_conn()
+    try:
+        with conn:
+            conn.execute(
+                "INSERT INTO guthaben (project_id, person, betrag, notiz, created_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (project_id, person.strip(), round(betrag, 2), notiz, _now()),
+            )
+            verrechnet = _guthaben_verrechnen(conn, project_id, person)
+            saldo = _guthaben_saldo_conn(conn, project_id, person)
+        return {"verrechnet": verrechnet, "saldo": saldo}
+    finally:
+        conn.close()
+
+
+def guthaben_saldo(project_id: int, person: str) -> dict:
+    """Aktuelles Guthaben einer Person im Projekt plus Einzahlungen."""
+    conn = get_conn()
+    try:
+        saldo = _guthaben_saldo_conn(conn, project_id, person)
+        posten = conn.execute(
+            "SELECT id, betrag, notiz, created_at FROM guthaben "
+            "WHERE project_id = ? AND lower(person) = lower(?) ORDER BY created_at, id",
+            (project_id, person.strip()),
+        ).fetchall()
+        return {"saldo": saldo, "einzahlungen": [dict(p) for p in posten]}
+    finally:
+        conn.close()
 
 
 def list_time_entries(filters: dict | None = None) -> list[sqlite3.Row]:

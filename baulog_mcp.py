@@ -1494,5 +1494,38 @@ register_tool("dokument_zu_paperless", dokument_zu_paperless)
 # Einstiegspunkt
 # ---------------------------------------------------------------------------
 
+def guthaben_einzahlen(projekt_id: int, person: str, betrag: float, notiz: str = "") -> dict:
+    """
+    Trägt ein Guthaben (Vorauszahlung/Vorstreckung) für eine Person ein, z. B.
+    „Koffee hat 500 € vorgestreckt“ → guthaben_einzahlen(projekt_id, "Koffee", 500).
+    Das Guthaben wird sofort auf offene Stunden der Person verrechnet (älteste zuerst)
+    und danach bei jeder neuen Stunde automatisch zuerst verbraucht. Die verrechneten
+    Einträge gelten als „bezahlt“.
+
+    Parameter:
+        projekt_id — ID des Projekts.
+        person     — Name, z. B. „Koffee“.
+        betrag     — Einzahlung in Euro (> 0).
+        notiz      — Optional, z. B. „Barzahlung 05.11.“.
+
+    Rückgabe: {"status": "ok", "verrechnet": <Euro sofort verrechnet>, "saldo": <Restguthaben>}
+    """
+    payload = {"person": person, "amount": betrag}
+    if notiz:
+        payload["notiz"] = notiz
+    return _post(f"/api/projects/{projekt_id}/guthaben", payload)
+
+
+def guthaben_stand(projekt_id: int, person: str) -> dict:
+    """
+    Zeigt das aktuelle Guthaben einer Person im Projekt (Restbetrag, der bei neuen
+    Stunden automatisch verbraucht wird) und alle Einzahlungen.
+    """
+    return _get(f"/api/projects/{projekt_id}/guthaben?person={person}")
+
+
+register_tool("guthaben_einzahlen", guthaben_einzahlen)
+register_tool("guthaben_stand", guthaben_stand)
+
 if __name__ == "__main__":
     run_server()

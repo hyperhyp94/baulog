@@ -988,6 +988,39 @@ def api_project_payout(pid: int):
     return _ok(**res)
 
 
+@app.route("/api/projects/<int:pid>/guthaben", methods=["GET"])
+def api_guthaben_get(pid: int):
+    """Guthaben einer Person im Projekt. Query: ?person=Koffee"""
+    if not db.get_project(pid):
+        return _err("Projekt nicht gefunden.", 404)
+    person = (request.args.get("person") or "").strip()
+    if not person:
+        return _err("Query-Parameter 'person' fehlt.")
+    return _ok(**db.guthaben_saldo(pid, person))
+
+
+@app.route("/api/projects/<int:pid>/guthaben", methods=["POST"])
+def api_guthaben_create(pid: int):
+    """
+    Guthaben (Vorauszahlung) einzahlen. Wird sofort und danach bei jeder neuen
+    Stunde automatisch mit offenen Einträgen der Person verrechnet (älteste zuerst).
+
+    Body (JSON): { "person": "Koffee", "amount": 500, "notiz"?: "..." }
+    """
+    if not db.get_project(pid):
+        return _err("Projekt nicht gefunden.", 404)
+    data = request.get_json(silent=True) or {}
+    person, err = _str_field(data, "person", required=True)
+    if err:
+        return err
+    amount, err = _num_field(data, "amount", required=True, greater_than=0)
+    if err:
+        return err
+    notiz = data.get("notiz") or None
+    res = db.guthaben_einzahlen(pid, person, amount, notiz)
+    return _ok(**res), 201
+
+
 @app.route("/api/timeentries/<int:eid>", methods=["DELETE"])
 def api_timeentry_delete(eid: int):
     """Löscht einen Zeiteintrag."""
