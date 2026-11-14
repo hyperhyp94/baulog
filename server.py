@@ -1371,6 +1371,49 @@ def api_document_file(doc_id: int):
     return send_from_directory(directory, fname, mimetype=mime)
 
 
+def _pdf_pfad(doc_id: int):
+    doc = db.get_document(doc_id)
+    if not doc or doc["mime"] != "application/pdf":
+        return None
+    pfad = doc["stored_path"]
+    return pfad if pfad and os.path.exists(pfad) else None
+
+
+@app.route("/api/documents/<int:doc_id>/seiten", methods=["GET"])
+def api_document_seiten(doc_id: int):
+    """Seitenzahl eines PDF-Dokuments (für die Seitenansicht auf dem Handy)."""
+    import subprocess
+    pfad = _pdf_pfad(doc_id)
+    if not pfad:
+        return _err("Kein PDF-Dokument.", 404)
+    try:
+        out = subprocess.run(["pdfinfo", pfad], capture_output=True, text=True, timeout=20).stdout
+        seiten = int(next(l.split()[-1] for l in out.splitlines() if l.startswith("Pages:")))
+    except (OSError, ValueError, StopIteration, subprocess.SubprocessError):
+        return _err("PDF konnte nicht gelesen werden.", 500)
+    return _ok(seiten=seiten)
+
+
+@app.route("/api/documents/<int:doc_id>/seite/<int:nr>", methods=["GET"])
+def api_document_seite(doc_id: int, nr: int):
+    """Eine PDF-Seite als JPEG (iPhone zeigt eingebettete PDFs nur mit Seite 1)."""
+    import subprocess
+    pfad = _pdf_pfad(doc_id)
+    if not pfad or nr < 1 or nr > 200:
+        return _err("Seite nicht gefunden.", 404)
+    try:
+        r = subprocess.run(["pdftoppm", "-r", "130", "-jpeg", "-jpegopt", "quality=85",
+                            "-f", str(nr), "-l", str(nr), "-singlefile", pfad, "-"],
+                           capture_output=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return _err("PDF konnte nicht gelesen werden.", 500)
+    if r.returncode != 0 or not r.stdout:
+        return _err("Seite nicht gefunden.", 404)
+    resp = app.response_class(r.stdout, mimetype="image/jpeg")
+    resp.headers["Cache-Control"] = "max-age=86400"
+    return resp
+
+
 @app.route("/api/documents/<int:doc_id>", methods=["DELETE"])
 def api_document_delete(doc_id: int):
     """Löscht ein Dokument aus der Datenbank und entfernt die Datei vom Dateisystem."""
