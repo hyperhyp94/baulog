@@ -262,6 +262,7 @@
     <nav class="kopf-links">
       <a href="#/" data-nav="projekte">Projekte</a>
       <a href="#/personen" data-nav="personen">Personen</a>
+      <a href="#/verlauf" data-nav="verlauf">Verlauf</a>
     </nav>
   </div>
 </header>
@@ -497,12 +498,13 @@ async function route() {
   const teile = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean);
   closeModal();
   document.querySelectorAll('.kopf-links a').forEach(a =>
-    a.classList.toggle('aktiv', a.dataset.nav === (teile[0] === 'personen' ? 'personen' : 'projekte')));
+    a.classList.toggle('aktiv', a.dataset.nav === (['personen', 'verlauf'].includes(teile[0]) ? teile[0] : 'projekte')));
   try {
     if (teile[0] === 'p' && /^\d+$/.test(teile[1])) return await zeigeProjekt(Number(teile[1]), teile[2] || 'logbuch');
     // Alte Links (#/projekte/5) weiterhin auflösen
     if (teile[0] === 'projekte' && /^\d+$/.test(teile[1])) return location.replace('#/p/' + teile[1]);
     if (teile[0] === 'personen') return await zeigePersonen();
+    if (teile[0] === 'verlauf') return await zeigeVerlauf();
     return await zeigeProjekte();
   } catch (e) {
     $('#view').innerHTML = `<div class="leer"><p>${esc(e.message)}</p>
@@ -1855,6 +1857,83 @@ function loescheBereich(id) {
 // ============================================================
 // PERSONEN
 // ============================================================
+// ============================================================
+// VERLAUF (Änderungsprotokoll mit Rückgängig)
+// ============================================================
+const VERLAUF_TABELLEN = {
+  projects: 'Projekt', sites: 'Bereich', trades: 'Gewerk', tasks: 'Aufgabe', time_entries: 'Stunden',
+  materials: 'Material', documents: 'Datei', persons: 'Person', guthaben: 'Guthaben',
+  guthaben_verbrauch: 'Guthaben-Verrechnung', receipts: 'Kassenbon' };
+const VERLAUF_FELDER = { paid: 'bezahlt', paid_amount: 'Teilzahlung', hours: 'Stunden', hourly_rate: 'Stundensatz',
+  work_date: 'Datum', billed: 'mit Rechnung', qty: 'Menge', unit_price: 'Preis', name: 'Name', title: 'Titel',
+  status: 'Status', travel_cost: 'Anfahrt', store: 'Markt', purchase_date: 'Kaufdatum', person: 'Person', total: 'Summe' };
+const VERLAUF_AKTION = { insert: 'angelegt', update: 'geändert', delete: 'gelöscht' };
+const Verlauf = { liste: [], filter: '' };
+
+function verlaufWert(k, v) {
+  if (v == null || v === '') return '–';
+  if (k === 'paid' || k === 'billed') return v ? 'ja' : 'nein';
+  if (typeof v === 'number' && /price|rate|amount|cost|total|betrag/.test(k)) return euro(v);
+  return String(v);
+}
+function verlaufTitel(c) {
+  const r = c.new || c.old || {};
+  return r.name || r.title || r.person || r.store || r.filename || ('#' + c.row_id);
+}
+function verlaufDetails(c) {
+  if (c.action !== 'update') {
+    const r = c.new || c.old || {};
+    return ['hours', 'hourly_rate', 'work_date', 'qty', 'unit_price', 'paid', 'total', 'purchase_date']
+      .filter(k => k in r && r[k] != null).map(k => `${VERLAUF_FELDER[k] || k}: ${esc(verlaufWert(k, r[k]))}`).join(' · ');
+  }
+  return Object.keys(c.new).filter(k => k !== 'created_at' && JSON.stringify(c.old[k]) !== JSON.stringify(c.new[k]))
+    .map(k => `${esc(VERLAUF_FELDER[k] || k)}: <s>${esc(verlaufWert(k, c.old[k]))}</s> → <b>${esc(verlaufWert(k, c.new[k]))}</b>`).join('<br>');
+}
+
+async function zeigeVerlauf() {
+  document.body.classList.remove('mit-leiste');
+  $('#view').innerHTML = '<div class="leer">Lade …</div>';
+  const d = await api('GET', '/api/changelog?limit=500');
+  Verlauf.liste = d.changes;
+  zeichneVerlauf();
+}
+
+function zeichneVerlauf() {
+  const f = Verlauf.filter.toLowerCase();
+  const liste = Verlauf.liste.filter(c => !f || (VERLAUF_TABELLEN[c.tbl] + ' ' + verlaufTitel(c)).toLowerCase().includes(f));
+  let tag = '';
+  $('#view').innerHTML = `
+    <h1>Verlauf</h1>
+    <p class="muted">Jede Änderung wird automatisch protokolliert – auch von Hermes. Einzelne Änderungen lassen sich hier rückgängig machen.</p>
+    <input placeholder="Filtern, z. B. Robert oder Stunden" value="${esc(Verlauf.filter)}"
+      oninput="Verlauf.filter=this.value; zeichneVerlauf(); const i=$('#view input'); i.focus(); i.setSelectionRange(i.value.length,i.value.length)">
+    <div style="margin-top:12px">${liste.map(c => {
+      const lokal = new Date(c.ts);
+      const t = isoDatum(lokal);
+      const kopf = t !== tag ? `<h3 style="margin:18px 0 6px">${esc(datumLang(t))}</h3>` : '';
+      tag = t;
+      return `${kopf}<div class="box" style="padding:10px 12px; margin-bottom:6px; ${c.undone_by ? 'opacity:.55' : ''}">
+        <div style="display:flex; gap:8px; justify-content:space-between; align-items:flex-start">
+          <div><b>${esc(VERLAUF_TABELLEN[c.tbl] || c.tbl)} ${VERLAUF_AKTION[c.action]}</b>: ${esc(verlaufTitel(c))}
+            <div class="hinweis">${lokal.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} Uhr · ${esc(c.quelle || 'direkt in der Datenbank')}${c.undone_by ? ' · rückgängig gemacht' : ''}</div>
+            <div style="font-size:13px; margin-top:4px">${verlaufDetails(c)}</div></div>
+          ${c.undone_by ? '' : `<button class="hell klein" onclick="verlaufUndo(${c.id})">Rückgängig</button>`}
+        </div></div>`;
+    }).join('') || '<div class="leer">Noch keine Änderungen protokolliert.</div>'}</div>`;
+}
+
+function verlaufUndo(id) {
+  const c = Verlauf.liste.find(x => x.id === id);
+  bestaetigen('Änderung rückgängig machen?',
+    `${esc(VERLAUF_TABELLEN[c.tbl] || c.tbl)} „${esc(verlaufTitel(c))}“ (${VERLAUF_AKTION[c.action]}) wird zurückgesetzt. Auch das wird protokolliert.`,
+    'Rückgängig', async () => {
+      await api('POST', `/api/changelog/${id}/undo`);
+      closeModal();
+      showToast('Rückgängig gemacht', 'success');
+      await zeigeVerlauf();
+    });
+}
+
 async function zeigePersonen() {
   P = null;
   document.body.classList.remove('mit-leiste');

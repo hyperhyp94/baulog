@@ -315,7 +315,148 @@ def init_db() -> None:
             _migrate_v5(conn)
         if _user_version(conn) < 6:
             _migrate_v6(conn)
+    install_changelog(conn)
     conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Änderungsprotokoll: jede Änderung an den Datentabellen wird per SQLite-Trigger
+# mit altem und neuem Zeilenstand (JSON) mitgeschrieben — egal ob sie über die
+# Oberfläche, Hermes/MCP oder direkt in der DB passiert. Damit lässt sich jede
+# Änderung nachvollziehen und einzeln rückgängig machen.
+# ---------------------------------------------------------------------------
+
+CHANGELOG_TABLES = ("projects", "sites", "trades", "tasks", "time_entries", "materials",
+                    "documents", "persons", "guthaben", "guthaben_verbrauch", "receipts")
+
+
+def install_changelog(conn: sqlite3.Connection) -> None:
+    """
+    Legt die Tabelle changelog an und (re)generiert die Trigger aus den aktuellen
+    Spalten — nach jeder Migration aufgerufen, damit neue Spalten mitprotokolliert werden.
+    """
+    with conn:
+        conn.execute("""CREATE TABLE IF NOT EXISTS changelog (
+            id       INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts       TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+            tbl      TEXT    NOT NULL,
+            row_id   INTEGER NOT NULL,
+            action   TEXT    NOT NULL,          -- insert | update | delete
+            old_json TEXT,
+            new_json TEXT,
+            quelle   TEXT,                      -- Web-Oberfläche | Hermes/MCP | NULL = direkt in der DB
+            undone_by INTEGER
+        )""")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_changelog_row ON changelog(tbl, row_id)")
+        existing = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        for t in CHANGELOG_TABLES:
+            for act in ("insert", "update", "delete"):
+                conn.execute(f"DROP TRIGGER IF EXISTS log_{t}_{act}")
+            if t not in existing:
+                continue
+            cols = [r[1] for r in conn.execute(f"PRAGMA table_info({t})")]
+            def obj(prefix):
+                return "json_object(" + ", ".join(f"'{c}', {prefix}.{c}" for c in cols) + ")"
+            conn.execute(f"""CREATE TRIGGER log_{t}_insert AFTER INSERT ON {t} BEGIN
+                INSERT INTO changelog (tbl, row_id, action, new_json)
+                VALUES ('{t}', NEW.id, 'insert', {obj('NEW')}); END""")
+            changed = " OR ".join(f"OLD.{c} IS NOT NEW.{c}" for c in cols)
+            conn.execute(f"""CREATE TRIGGER log_{t}_update AFTER UPDATE ON {t}
+                WHEN {changed} BEGIN
+                INSERT INTO changelog (tbl, row_id, action, old_json, new_json)
+                VALUES ('{t}', NEW.id, 'update', {obj('OLD')}, {obj('NEW')}); END""")
+            conn.execute(f"""CREATE TRIGGER log_{t}_delete AFTER DELETE ON {t} BEGIN
+                INSERT INTO changelog (tbl, row_id, action, old_json)
+                VALUES ('{t}', OLD.id, 'delete', {obj('OLD')}); END""")
+
+
+def changelog_max_id() -> int:
+    conn = get_conn()
+    try:
+        return conn.execute("SELECT COALESCE(MAX(id), 0) FROM changelog").fetchone()[0]
+    finally:
+        conn.close()
+
+
+def changelog_tag(after_id: int, quelle: str) -> None:
+    """Ordnet alle seit after_id entstandenen, noch unmarkierten Einträge einer Quelle zu."""
+    conn = get_conn()
+    with conn:
+        conn.execute("UPDATE changelog SET quelle = ? WHERE id > ? AND quelle IS NULL",
+                     (quelle, after_id))
+    conn.close()
+
+
+def list_changelog(limit: int = 200, tbl: str | None = None, row_id: int | None = None,
+                   before_id: int | None = None) -> list[sqlite3.Row]:
+    sql, args = "SELECT * FROM changelog WHERE 1=1", []
+    if tbl:
+        sql += " AND tbl = ?"; args.append(tbl)
+    if row_id is not None:
+        sql += " AND row_id = ?"; args.append(row_id)
+    if before_id:
+        sql += " AND id < ?"; args.append(before_id)
+    sql += " ORDER BY id DESC LIMIT ?"; args.append(limit)
+    conn = get_conn()
+    try:
+        return conn.execute(sql, args).fetchall()
+    finally:
+        conn.close()
+
+
+class UndoError(Exception):
+    pass
+
+
+def undo_change(change_id: int) -> int:
+    """
+    Macht eine protokollierte Änderung rückgängig und liefert die id des dadurch
+    entstandenen Protokolleintrags.
+    - update → alte Werte zurückschreiben (nur wenn die Zeile seitdem nicht weiter geändert wurde)
+    - insert → Zeile löschen
+    - delete → Zeile mit alten Werten wieder anlegen
+    """
+    import json
+    conn = get_conn()
+    try:
+        c = conn.execute("SELECT * FROM changelog WHERE id = ?", (change_id,)).fetchone()
+        if not c:
+            raise UndoError("Protokolleintrag nicht gefunden.")
+        if c["undone_by"]:
+            raise UndoError("Diese Änderung wurde bereits rückgängig gemacht.")
+        t = c["tbl"]
+        if t not in CHANGELOG_TABLES:
+            raise UndoError("Tabelle nicht unterstützt.")
+        cols = {r[1] for r in conn.execute(f"PRAGMA table_info({t})")}
+        later = conn.execute(
+            "SELECT 1 FROM changelog WHERE tbl = ? AND row_id = ? AND id > ? AND undone_by IS NULL "
+            "AND id NOT IN (SELECT undone_by FROM changelog WHERE undone_by IS NOT NULL)",
+            (t, c["row_id"], change_id)).fetchone()
+        if later and c["action"] != "delete":
+            raise UndoError("Der Eintrag wurde danach noch einmal geändert – bitte zuerst die "
+                            "neueren Änderungen rückgängig machen.")
+        with conn:
+            if c["action"] == "update":
+                old = {k: v for k, v in json.loads(c["old_json"]).items() if k in cols and k != "id"}
+                conn.execute(f"UPDATE {t} SET " + ", ".join(f"{k} = ?" for k in old) + " WHERE id = ?",
+                             [*old.values(), c["row_id"]])
+            elif c["action"] == "insert":
+                conn.execute(f"DELETE FROM {t} WHERE id = ?", (c["row_id"],))
+            else:
+                if conn.execute(f"SELECT 1 FROM {t} WHERE id = ?", (c["row_id"],)).fetchone():
+                    raise UndoError("Ein Eintrag mit dieser Nummer existiert bereits.")
+                old = {k: v for k, v in json.loads(c["old_json"]).items() if k in cols}
+                conn.execute(f"INSERT INTO {t} (" + ", ".join(old) + ") VALUES ("
+                             + ", ".join("?" for _ in old) + ")", list(old.values()))
+            new_id = conn.execute("SELECT MAX(id) FROM changelog").fetchone()[0]
+            if new_id == change_id:
+                raise UndoError("Es gab nichts zurückzusetzen.")
+            conn.execute("UPDATE changelog SET undone_by = ? WHERE id = ?", (new_id, change_id))
+        return new_id
+    except sqlite3.IntegrityError as exc:
+        raise UndoError(f"Rückgängig nicht möglich (abhängige Daten fehlen): {exc}")
+    finally:
+        conn.close()
 
 
 # ---------------------------------------------------------------------------

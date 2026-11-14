@@ -59,6 +59,7 @@ def _request(method: str, path: str, payload: dict | None = None) -> dict:
 
 
 def _send(method: str, path: str, body: bytes | None, headers: dict) -> dict:
+    headers = {**headers, "X-Baulog-Quelle": "Hermes/MCP"}  # für das Änderungsprotokoll
     """
     Schickt einen fertigen Request-Body an die API (JSON oder Multipart).
 

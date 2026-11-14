@@ -18,7 +18,7 @@ from datetime import date
 from pathlib import Path
 
 import requests
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, g, jsonify, request, send_from_directory
 from werkzeug.exceptions import HTTPException
 from werkzeug.utils import secure_filename
 
@@ -286,6 +286,67 @@ def _trade_or_error(trade_id, site_id: int):
     if trade["site_id"] != site_id:
         return None, _err("Gewerk gehört zu einer anderen Baustelle.")
     return trade_id, None
+
+
+# ---------------------------------------------------------------------------
+# Änderungsprotokoll: Quelle jeder Änderung festhalten (Trigger schreiben die Zeilen)
+# ---------------------------------------------------------------------------
+
+@app.before_request
+def _changelog_start():
+    if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+        try:
+            g.changelog_start = db.changelog_max_id()
+        except sqlite3.Error:
+            g.changelog_start = None
+
+
+@app.after_request
+def _changelog_tag(resp):
+    start = g.get("changelog_start")
+    if start is not None:
+        quelle = request.headers.get("X-Baulog-Quelle", "")[:40]
+        if not quelle:
+            ua = request.headers.get("User-Agent", "")
+            quelle = "Hermes/MCP" if ua.startswith("Python-urllib") else "Web-Oberfläche"
+        try:
+            db.changelog_tag(start, quelle)
+        except sqlite3.Error:
+            app.logger.warning("Änderungsprotokoll: Quelle konnte nicht gesetzt werden")
+    return resp
+
+
+@app.route("/api/changelog", methods=["GET"])
+def api_changelog():
+    """Letzte Änderungen. Query: limit (max 500), tbl, row_id, before_id (zum Weiterblättern)."""
+    args = {}
+    for key in ("limit", "row_id", "before_id"):
+        if request.args.get(key):
+            val, err = _int_arg(key, request.args[key])
+            if err:
+                return err
+            args[key] = val
+    args["limit"] = max(1, min(args.get("limit", 200), 500))
+    tbl = request.args.get("tbl")
+    if tbl and tbl not in db.CHANGELOG_TABLES:
+        return _err("Unbekannte Tabelle.")
+    rows = []
+    for r in db.list_changelog(tbl=tbl, **args):
+        d = dict(r)
+        d["old"] = json.loads(d.pop("old_json")) if r["old_json"] else None
+        d["new"] = json.loads(d.pop("new_json")) if r["new_json"] else None
+        rows.append(d)
+    return _ok(changes=rows)
+
+
+@app.route("/api/changelog/<int:cid>/undo", methods=["POST"])
+def api_changelog_undo(cid: int):
+    """Macht eine einzelne protokollierte Änderung rückgängig."""
+    try:
+        new_id = db.undo_change(cid)
+    except db.UndoError as exc:
+        return _err(str(exc), 409)
+    return _ok(undo_id=new_id)
 
 
 # ---------------------------------------------------------------------------
