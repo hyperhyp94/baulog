@@ -2010,6 +2010,34 @@ def api_eingang_delete(eid):
     return _ok()
 
 
+@app.route("/api/projects/<int:pid>/bericht.pdf", methods=["GET"])
+def api_projekt_bericht(pid: int):
+    """Projektbericht als PDF. Query: fotos=1 hängt Fotos/Belege an."""
+    import subprocess
+    import tempfile
+    projekt = db.get_project(pid)
+    if not projekt:
+        return _err("Projekt nicht gefunden.", 404)
+    fotos = "1" if request.args.get("fotos") == "1" else "0"
+    with tempfile.TemporaryDirectory() as tmp:
+        ziel = os.path.join(tmp, "bericht.pdf")
+        try:
+            r = subprocess.run(
+                ["/usr/bin/python3", os.path.join(os.path.dirname(os.path.abspath(__file__)), "bericht.py"),
+                 str(pid), fotos, ziel], capture_output=True, text=True, timeout=180)
+        except (OSError, subprocess.SubprocessError) as exc:
+            return _err(f"Bericht konnte nicht erstellt werden: {exc}", 500)
+        if r.returncode != 0 or not os.path.exists(ziel):
+            app.logger.error("Bericht-Fehler: %s", r.stderr[-1000:])
+            return _err("Bericht konnte nicht erstellt werden.", 500)
+        with open(ziel, "rb") as fh:
+            daten = fh.read()
+    name = secure_filename(f"Baulog_{projekt['name']}_{date.today().isoformat()}.pdf") or "Baulog_Bericht.pdf"
+    resp = app.response_class(daten, mimetype="application/pdf")
+    resp.headers["Content-Disposition"] = f'inline; filename="{name}"'
+    return resp
+
+
 # ---------------------------------------------------------------------------
 # Einstiegspunkt
 # ---------------------------------------------------------------------------

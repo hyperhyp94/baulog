@@ -733,6 +733,7 @@ function zeichneProjekt() {
         ${P.project.note && P.project.note !== P.project.name ? `<div class="muted">${esc(P.project.note)}</div>` : ''}
         ${adresse ? `<div class="muted">${esc(adresse)}</div>` : ''}
       </div>
+      <button class="hell klein" onclick="formBericht()">📄 Bericht</button>
       <button class="hell klein" onclick="formProjekt()">Bearbeiten</button>
     </div>
 
@@ -2343,6 +2344,46 @@ async function zeigeEingang(eid) {
     Bon.erg = null; Bon.task = null; Bon.eingang = eid;
     bonFotos();
   }));
+}
+
+// ============================================================
+// PROJEKTBERICHT (PDF)
+// ============================================================
+function formBericht() {
+  openModal(`${modalKopf('Projektbericht als PDF')}
+    <div class="modal-body">
+      <p style="margin-top:0">Übersicht zum aktuellen Stand: Kosten, bezahlt/offen, Kosten je Aufgabe,
+        Personen, Aufgaben, alle Stunden und Materialpositionen.</p>
+      <label style="display:flex; gap:8px; align-items:center; font-weight:normal">
+        <input type="checkbox" id="ber-fotos" style="width:auto; min-height:0"> Fotos &amp; Belege anhängen (größere Datei)</label>
+      <p class="hinweis" id="ber-status"></p>
+    </div>
+    <div class="modal-fuss"><button class="hell" onclick="closeModal()">Abbrechen</button>
+      <span class="spacer"></span><button id="ber-los" onclick="berichtErstellen()">PDF erstellen</button></div>`);
+}
+
+async function berichtErstellen() {
+  const fotos = $('#ber-fotos').checked ? 1 : 0;
+  const url = `/api/projects/${P.pid}/bericht.pdf?fotos=${fotos}`;
+  const knopf = $('#ber-los'), st = $('#ber-status');
+  knopf.disabled = true; st.textContent = 'Bericht wird erstellt …'; st.style.color = 'var(--grey)';
+  try {
+    const res = await fetch(url);
+    if (!res.ok) { let j = {}; try { j = await res.json(); } catch (e) { /* */ } throw new Error(j.error || 'Fehler ' + res.status); }
+    const blob = await res.blob();
+    const name = (/filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') || '') || [])[1] || 'Baulog_Bericht.pdf';
+    const datei = new File([blob], name, { type: 'application/pdf' });
+    const burl = URL.createObjectURL(blob);
+    const teilbar = navigator.canShare && navigator.canShare({ files: [datei] });
+    st.style.color = 'var(--green)';
+    st.innerHTML = `✓ Fertig (${(blob.size / 1024 / 1024).toFixed(1).replace('.', ',')} MB)`;
+    $('#modal-content .modal-fuss').innerHTML = `<a class="btn hell" href="${burl}" download="${esc(name)}">Herunterladen</a>
+      <span class="spacer"></span>
+      ${teilbar ? '<button id="ber-teilen">Teilen / Sichern</button>' : `<a class="btn" href="${burl}" target="_blank" rel="noopener">Öffnen</a>`}`;
+    if (teilbar) $('#ber-teilen').onclick = () => navigator.share({ files: [datei], title: name }).catch(() => {});
+  } catch (e) {
+    st.textContent = '✗ ' + e.message; st.style.color = 'var(--red)'; knopf.disabled = false;
+  }
 }
 
 // Belege/Fotos in einer Vollbild-Ebene mit Schließen-Knopf zeigen statt die Seite zu verlassen
