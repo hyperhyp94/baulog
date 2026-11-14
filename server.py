@@ -2244,6 +2244,10 @@ def api_suche():
     if len(q) < 2:
         return _err("Bitte mindestens 2 Zeichen eingeben.")
     woerter = [w for w in re.split(r"\s+", q) if w]
+    try:
+        nur_projekt = int(request.args.get("project_id") or 0) or None
+    except ValueError:
+        nur_projekt = None
     q_norm = _such_norm(q)
     conn = db.get_conn()
     try:
@@ -2260,6 +2264,8 @@ def api_suche():
         conn.close()
     treffer = []
     for m in rows:
+        if nur_projekt and m["project_id"] != nur_projekt:
+            continue
         heu = f"{m['name']} {m['store'] or ''} {m['bon_store'] or ''}"
         heu_norm = _such_norm(heu)
         if q_norm in heu_norm or all(_such_norm(w) in heu_norm for w in woerter):
@@ -2286,7 +2292,8 @@ def api_suche():
     if url and token:
         try:
             r = requests.get(f"{url}/api/documents/", timeout=10, headers={"Authorization": f"Token {token}"},
-                             params={"query": q, "page_size": 10, "fields": "id,title,created"})
+                             params={"query": q + (f' "{db.get_project(nur_projekt)["name"]}"' if nur_projekt and db.get_project(nur_projekt) else ""),
+                                     "page_size": 10, "fields": "id,title,created"})
             for x in (r.json().get("results") or []) if r.ok else []:
                 hl = (x.get("__search_hit__") or {}).get("highlights") or ""
                 hl = re.sub(r"<span[^>]*>(.*?)</span>", r"[[\1]]", hl)
@@ -2298,11 +2305,17 @@ def api_suche():
     return _ok(q=q, treffer=treffer[:200], uebersicht=uebersicht, paperless=paperless)
 
 
-def _frage_kontext() -> str:
-    """Alle Baulog-Daten kompakt als Tabellen (Material, Stunden, Belege, Auszahlungen)."""
+def _frage_kontext(project_id: int | None = None) -> str:
+    """Baulog-Daten kompakt als Tabellen (Material, Stunden, Belege, Auszahlungen) – alle oder ein Projekt."""
     conn = db.get_conn()
     try:
-        q = lambda sql: conn.execute(sql).fetchall()
+        def q(sql):
+            if project_id:  # jede Projekt-Verknüpfung auf das gewählte Projekt einschränken (int, kein Injection-Risiko)
+                pid = int(project_id)
+                sql = (sql.replace("JOIN projects p ON p.id=s.project_id", f"JOIN projects p ON p.id=s.project_id AND p.id={pid}")
+                          .replace("JOIN projects p ON p.id=g.project_id", f"JOIN projects p ON p.id=g.project_id AND p.id={pid}")
+                          .replace("SELECT * FROM projects", f"SELECT * FROM projects WHERE id={pid}"))
+            return conn.execute(sql).fetchall()
         zeilen = ["## FERTIG BERECHNETE SUMMEN (diese Zahlen verwenden, nicht selbst neu addieren)"]
         zeilen.append("### Stunden je Person, Projekt und Monat (person | projekt | monat | tage | stunden | betrag | bezahlt | offen)")
         for r in q("SELECT te.person, p.name AS projekt, substr(COALESCE(te.work_date, te.created_at),1,7) AS monat, "
@@ -2362,14 +2375,25 @@ def _frage_kontext() -> str:
 @app.route("/api/frage", methods=["POST"])
 def api_frage():
     """Frage in normaler Sprache zu allen Baulog-Daten. Body: {"frage": "..."}"""
-    frage = ((request.get_json(silent=True) or {}).get("frage") or "").strip()
+    body = request.get_json(silent=True) or {}
+    frage = (body.get("frage") or "").strip()
+    try:
+        project_id = int(body.get("project_id") or 0) or None
+    except (TypeError, ValueError):
+        project_id = None
+    projekt = db.get_project(project_id) if project_id else None
+    if project_id and not projekt:
+        return _err("Projekt nicht gefunden.", 404)
     if len(frage) < 3:
         return _err("Bitte eine Frage eingeben.")
     if len(frage) > 500:
         return _err("Die Frage ist zu lang (max. 500 Zeichen).")
     system = (
         "Du beantwortest Fragen zu einem Bautagebuch (Baulog) eines Handwerkers. Heute ist "
-        f"{date.today().strftime('%d.%m.%Y')}. Unten stehen ALLE Daten als Tabellen. Beträge sind Euro brutto.\n"
+        f"{date.today().strftime('%d.%m.%Y')}. "
+        + (f"Die Frage bezieht sich NUR auf das Projekt '{projekt['name']}'; unten stehen nur dessen Daten. "
+           if projekt else "Unten stehen die Daten ALLER Projekte als Tabellen. ")
+        + "Beträge sind Euro brutto.\n"
         "Regeln: Antworte kurz auf Deutsch. Rechne genau nach (Summen, Mengen, Durchschnitt) und nenne das Ergebnis "
         "zuerst. Nenne bei Material die Belege als 'Beleg N' mit Projekt und Datum, damit man sie findet. "
         "Wenn etwas nicht in den Daten steht, sag das ehrlich – nichts erfinden. "
@@ -2377,12 +2401,13 @@ def api_frage():
         "daraus darfst du addieren. Auszahlungen/Guthaben sind im Bezahlt-Status der Einträge SCHON verrechnet – "
         "niemals noch einmal von 'offen' abziehen. 'offen' ist der wirklich noch zu zahlende Betrag. "
         "Formatierung: einfache Sätze und "
-        "kurze Aufzählungen mit '- ', keine Tabellen, kein Markdown außer **fett**.\n\n" + _frage_kontext())
+        "kurze Aufzählungen mit '- ', keine Tabellen, kein Markdown außer **fett**.\n\n" + _frage_kontext(project_id))
     try:
         antwort = receipts.text_anfrage(CONFIG_PATH, system, frage)
     except receipts.ReceiptError as exc:
         return _err(str(exc), exc.status)
-    return _ok(antwort=antwort.strip(), modell=receipts.load_config(CONFIG_PATH)["model"])
+    return _ok(antwort=antwort.strip(), modell=receipts.load_config(CONFIG_PATH)["model"],
+               projekt=projekt["name"] if projekt else None)
 
 
 # ---------------------------------------------------------------------------

@@ -737,6 +737,7 @@ function zeichneProjekt() {
         ${P.project.note && P.project.note !== P.project.name ? `<div class="muted">${esc(P.project.note)}</div>` : ''}
         ${adresse ? `<div class="muted">${esc(adresse)}</div>` : ''}
       </div>
+      <button class="hell klein" onclick="location.hash='#/suche'">🔍 Suchen / Fragen</button>
       <button class="hell klein" onclick="formBericht()">📄 Bericht</button>
       <button class="hell klein" onclick="formProjekt()">Bearbeiten</button>
     </div>
@@ -2408,10 +2409,19 @@ async function berichtErstellen() {
 // SUCHE über alle Projekte (Material, Preise, Belege) + Paperless-Volltext
 // ============================================================
 async function zeigeSuche(q) {
+  // zuletzt gewähltes Projekt bzw. das Projekt, aus dem man kommt
+  if (P && P.pid) App.suchProjekt = String(P.pid);
   P = null;
+  let projekte = [];
+  try { projekte = (await api('GET', '/api/projects')).projects; } catch (e) { /* ohne Auswahl weiter */ }
   document.body.classList.remove('mit-leiste');
   $('#view').innerHTML = `<div class="listenkopf"><div><h1>Suche</h1>
       <div class="muted">Material, Preise und Belege in allen Projekten – plus Volltext in Paperless</div></div></div>
+    <label for="such-projekt" style="margin-top:4px">Projekt</label>
+    <select id="such-projekt" onchange="App.suchProjekt = this.value; const v = $('#such-q').value.trim(); if (v && !/\?$/.test(v)) zeigeSuche(v)">
+      <option value="">Alle Projekte</option>
+      ${projekte.map(p => `<option value="${p.id}" ${String(p.id) === String(App.suchProjekt || '') ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}
+    </select>
     <form id="such-form" style="display:flex; gap:8px; margin:8px 0 14px">
       <input id="such-q" type="search" placeholder="z. B. SH 45 – oder eine Frage: Was hat Spachtel im November gekostet?" value="${esc(q || '')}" autofocus style="flex:1">
       <button>Suchen</button><button type="button" class="hell" onclick="kiFrage()">🤖 Fragen</button></form>
@@ -2427,7 +2437,8 @@ async function zeigeSuche(q) {
   if (!q) return;
   $('#such-erg').innerHTML = '<div class="leer">Suche läuft …</div>';
   let d;
-  try { d = await api('GET', '/api/suche?q=' + encodeURIComponent(q)); }
+  const pidQ = App.suchProjekt ? '&project_id=' + encodeURIComponent(App.suchProjekt) : '';
+  try { d = await api('GET', '/api/suche?q=' + encodeURIComponent(q) + pidQ); }
   catch (e) { $('#such-erg').innerHTML = `<p style="color:var(--red)">${esc(e.message)}</p>`; return; }
   const u = d.uebersicht;
   const teile = [];
@@ -2463,12 +2474,12 @@ async function kiFrage() {
   if (frage.length < 3) return showError('Bitte eine Frage eingeben.');
   box.innerHTML = '<div class="box" style="padding:12px">🤖 Denke nach … (einige Sekunden)</div>';
   try {
-    const r = await api('POST', '/api/frage', { frage });
+    const r = await api('POST', '/api/frage', { frage, project_id: App.suchProjekt || null });
     const html = esc(r.antwort)
       .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
       .replace(/^- (.*)$/gm, '• $1');
     box.innerHTML = `<div class="box" style="padding:12px 14px; border-left:4px solid var(--green)">
-      <div class="muted" style="font-size:12px; margin-bottom:6px">🤖 Antwort (${esc(r.modell)}) auf: „${esc(frage)}“</div>
+      <div class="muted" style="font-size:12px; margin-bottom:6px">🤖 Antwort (${esc(r.modell)}) · ${r.projekt ? 'Projekt ' + esc(r.projekt) : 'alle Projekte'} · „${esc(frage)}“</div>
       <div style="white-space:pre-line; line-height:1.45">${html}</div>
       <div class="muted" style="font-size:11px; margin-top:8px">KI-Antwort aus den Baulog-Daten – bei wichtigen Beträgen den Beleg prüfen.</div></div>`;
   } catch (e) {
