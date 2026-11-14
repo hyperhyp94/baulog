@@ -1626,7 +1626,7 @@ function bonPruefen() {
         <div><label for="bon-datum">Kaufdatum</label><input id="bon-datum" type="date" value="${esc(e.datum || '')}"></div>
       </div>
       ${e.hinweise.length ? `<p class="hinweis" style="color:var(--red)">⚠ ${e.hinweise.map(esc).join('<br>⚠ ')}</p>` : ''}
-      <label>Positionen (Haken weg = nicht buchen)</label>
+      <label>Positionen (Haken weg = nicht buchen – gezählt werden nur die gewählten)</label>
       <div class="scrollx"><table>
         <tr><th></th><th>Was</th><th>Menge</th><th>Einh.</th><th>€/Einh.</th></tr>
         ${e.positionen.map((p, i) => `<tr data-bonpos="${i}">
@@ -1663,19 +1663,24 @@ function bonPruefen() {
 function bonPositionen() {
   const markt = $('#bon-markt').value.trim(), datum = $('#bon-datum').value;
   const rabatt = -Math.abs(parseZahl($('#bon-rabatt').value) || 0);
-  let pos = [...document.querySelectorAll('tr[data-bonpos]')]
-    .filter(tr => tr.querySelector('.bp-an').checked)
-    .map(tr => ({ name: tr.querySelector('.bp-name').value.trim(),
-                  qty: parseZahl(tr.querySelector('.bp-qty').value),
-                  unit: tr.querySelector('.bp-unit').value.trim() || null,
-                  unit_price: parseZahl(tr.querySelector('.bp-preis').value) }));
-  const brutto = pos.reduce((s, p) => s + (p.qty || 0) * (p.unit_price || 0), 0);
-  const ziel = r2(Math.max(0, brutto + rabatt));
+  const zeilen = [...document.querySelectorAll('tr[data-bonpos]')];
+  const lies = tr => ({ name: tr.querySelector('.bp-name').value.trim(),
+                        qty: parseZahl(tr.querySelector('.bp-qty').value),
+                        unit: tr.querySelector('.bp-unit').value.trim() || null,
+                        unit_price: parseZahl(tr.querySelector('.bp-preis').value) });
+  const wert = l => l.reduce((s, p) => s + (p.qty || 0) * (p.unit_price || 0), 0);
+  const alle = zeilen.map(lies);
+  let pos = zeilen.filter(tr => tr.querySelector('.bp-an').checked).map(lies);
+  const teil = pos.length < alle.length;
+  const brutto = wert(pos), bruttoAlle = wert(alle);
+  // Bei Teilauswahl bekommen die gewaehlten Positionen nur ihren Anteil am Rabatt.
+  const rabattAnteil = teil ? (bruttoAlle > 0 ? rabatt * brutto / bruttoAlle : 0) : rabatt;
+  const ziel = r2(Math.max(0, brutto + rabattAnteil));
   if ($('#bon-sammel').checked) {
     return { ziel, pos: pos.length ? [{ name: `Einkauf ${markt || ''} ${datum ? datumKurz(datum) : ''}`.replace(/\s+/g, ' ').trim(),
                                          qty: 1, unit: 'Pauschal', unit_price: ziel }] : [] };
   }
-  if (rabatt && brutto > 0) {
+  if (rabattAnteil && brutto > 0) {
     const f = ziel / brutto;
     pos = pos.map(p => ({ ...p, unit_price: Math.round(p.unit_price * f * 10000) / 10000 }));
     const rest = r2(ziel - pos.reduce((s, p) => s + r2(p.qty * p.unit_price), 0));
@@ -1684,14 +1689,20 @@ function bonPositionen() {
       g.unit_price = Math.round((g.unit_price + rest / g.qty) * 10000) / 10000;
     }
   }
-  return { ziel, pos };
+  return { ziel, pos, teil, anzahl: alle.length };
 }
 
 function bonSumme() {
-  const { ziel } = bonPositionen();
+  const { ziel, pos, teil, anzahl } = bonPositionen();
   const total = parseZahl($('#bon-total').value);
   $('#bon-summe').textContent = euro(ziel);
   const el = $('#bon-abgleich');
+  if (teil) {
+    el.style.color = 'var(--grey)';
+    el.textContent = `${pos.length} von ${anzahl} Positionen ausgewählt – gebucht werden nur diese: ${euro(ziel)}`
+      + (total >= 0 ? ` (ganzer Bon: ${euro(total)})` : '');
+    return;
+  }
   if (!(total >= 0)) { el.textContent = 'Bitte die Gesamtsumme vom Bon eintragen.'; el.style.color = 'var(--red)'; return; }
   const diff = r2(ziel - total);
   el.style.color = Math.abs(diff) <= 0.02 ? 'var(--green, green)' : 'var(--red)';
@@ -1703,11 +1714,12 @@ function bonBuchen() {
   return mitSperre(async () => {
     const store = $('#bon-markt').value.trim();
     const purchase_date = $('#bon-datum').value;
-    const total = parseZahl($('#bon-total').value);
     if (!store) throw new Error('Bitte den Markt / Händler eintragen.');
     if (!purchase_date) throw new Error('Bitte das Kaufdatum eintragen.');
+    const { pos, ziel, teil } = bonPositionen();
+    // Teilauswahl: gebucht wird die Summe der gewählten Positionen.
+    const total = teil ? ziel : parseZahl($('#bon-total').value);
     if (!(total >= 0)) throw new Error('Bitte die Gesamtsumme vom Bon eintragen.');
-    const { pos } = bonPositionen();
     if (!pos.length) throw new Error('Keine Position ausgewählt.');
     if (pos.some(p => !p.name || !(p.qty > 0) || !(p.unit_price >= 0)))
       throw new Error('Jede Position braucht Bezeichnung, Menge und Preis.');
