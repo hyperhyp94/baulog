@@ -2376,7 +2376,7 @@ async function berichtErstellen() {
     const burl = URL.createObjectURL(blob);
     const teilbar = navigator.canShare && navigator.canShare({ files: [datei] });
     st.style.color = 'var(--green)';
-    st.innerHTML = `✓ Fertig (${(blob.size / 1024 / 1024).toFixed(1).replace('.', ',')} MB)`;
+    st.innerHTML = `✓ Fertig (${blob.size < 1048576 ? Math.max(1, Math.round(blob.size / 1024)) + ' KB' : (blob.size / 1048576).toFixed(1).replace('.', ',') + ' MB'})`;
     $('#modal-content .modal-fuss').innerHTML = `<a class="btn hell" href="${burl}" download="${esc(name)}">Herunterladen</a>
       <span class="spacer"></span>
       ${teilbar ? '<button id="ber-teilen">Teilen / Sichern</button>' : `<a class="btn" href="${burl}" target="_blank" rel="noopener">Öffnen</a>`}`;
