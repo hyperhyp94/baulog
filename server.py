@@ -1402,6 +1402,12 @@ def api_document_seite(doc_id: int, nr: int):
     if not pfad or nr < 1 or nr > 200:
         return _err("Seite nicht gefunden.", 404)
     import tempfile
+    cache = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "pdfseiten")
+    cache_datei = os.path.join(cache, f"{doc_id}_{nr}_{int(os.path.getmtime(pfad))}.jpg")
+    if os.path.exists(cache_datei):
+        resp = send_from_directory(cache, os.path.basename(cache_datei), mimetype="image/jpeg")
+        resp.headers["Cache-Control"] = "max-age=86400"
+        return resp
     with tempfile.TemporaryDirectory() as tmp:
         ziel = os.path.join(tmp, "s")
         try:
@@ -1414,6 +1420,12 @@ def api_document_seite(doc_id: int, nr: int):
             return _err("Seite nicht gefunden.", 404)
         with open(ziel + ".jpg", "rb") as fh:
             bild = fh.read()
+    try:
+        os.makedirs(cache, exist_ok=True)
+        with open(cache_datei, "wb") as fh:
+            fh.write(bild)
+    except OSError:
+        pass
     resp = app.response_class(bild, mimetype="image/jpeg")
     resp.headers["Cache-Control"] = "max-age=86400"
     return resp

@@ -2216,28 +2216,37 @@ function belegZeigen(url) {
   o.innerHTML = `<div style="display:flex;gap:8px;padding:calc(env(safe-area-inset-top) + 8px) 12px 8px;background:#1A1A1A">
       <button id="beleg-zu" style="font-size:18px;padding:10px 16px">✕ Schließen</button><span class="spacer" style="flex:1"></span>
       <a href="${url}" download style="color:#fff;align-self:center">Speichern</a></div>
-    <div style="flex:1;overflow:auto;-webkit-overflow-scrolling:touch;display:flex;justify-content:center;align-items:flex-start">
-      <img src="${url}" style="max-width:100%;height:auto;display:block" alt="Beleg"></div>`;
+    <div id="beleg-platz" style="flex:1;overflow:auto;-webkit-overflow-scrolling:touch;display:flex;flex-direction:column;align-items:center">
+      <div style="color:#aaa;margin-top:40px">Wird geladen …</div></div>`;
   const zu = () => { o.remove(); window.removeEventListener('popstate', zu); };
-  // PDF: alle Seiten als Bilder untereinander (iPhone zeigt eingebettete PDFs nur mit Seite 1)
-  o.querySelector('img').onerror = async function () {
-    const platz = this.parentNode;
-    const m = url.match(/^\/api\/documents\/(\d+)\/file/);
-    let n = 0;
-    if (m) { try { n = (await api('GET', `/api/documents/${m[1]}/seiten`)).seiten; } catch (e) { n = 0; } }
-    if (!n) {
-      platz.innerHTML = `<iframe src="${url}" style="width:100%;height:100%;border:0;background:#fff"></iframe>`;
-      return;
-    }
-    platz.style.flexDirection = 'column'; platz.style.alignItems = 'center'; platz.style.justifyContent = 'flex-start';
-    platz.innerHTML = Array.from({ length: n }, (_, i) =>
-      `<div style="color:#aaa;font-size:13px;margin:10px 0 4px">Seite ${i + 1} von ${n}</div>
-       <img src="/api/documents/${m[1]}/seite/${i + 1}" style="width:100%;max-width:1000px;height:auto;display:block;background:#fff" alt="Seite ${i + 1}">`).join('');
-  };
   o.querySelector('#beleg-zu').onclick = () => { if (history.state && history.state.beleg) history.back(); else zu(); };
   document.body.appendChild(o);
   history.pushState({ beleg: 1 }, '');
   window.addEventListener('popstate', zu);
+  belegInhalt(url, o.querySelector('#beleg-platz'));
+}
+
+// PDFs immer als Seitenbilder untereinander: Safari auf dem iPhone zeigt ein PDF
+// sonst (als Bild oder eingebettet) nur mit der ersten Seite.
+async function belegInhalt(url, platz) {
+  const m = url.match(/^\/api\/documents\/(\d+)\/file/);
+  let n = 0;
+  if (m) {
+    const r = await fetch(`/api/documents/${m[1]}/seiten`).catch(() => null);
+    if (r && r.ok) { try { n = (await r.json()).seiten || 0; } catch (e) { n = 0; } }
+  }
+  if (n) {
+    platz.innerHTML = Array.from({ length: n }, (_, i) =>
+      `<div style="color:#aaa;font-size:13px;margin:10px 0 4px">Seite ${i + 1} von ${n}</div>
+       <img src="/api/documents/${m[1]}/seite/${i + 1}" alt="Seite ${i + 1}"
+         style="width:100%;max-width:1000px;min-height:200px;height:auto;display:block;background:#fff">`).join('')
+      + '<div style="height:40px;flex:none"></div>';
+    return;
+  }
+  platz.innerHTML = `<img src="${url}" style="max-width:100%;height:auto;display:block" alt="Beleg">`;
+  platz.querySelector('img').onerror = () => {
+    platz.innerHTML = `<iframe src="${url}" style="width:100%;height:100%;border:0;background:#fff"></iframe>`;
+  };
 }
 document.addEventListener('click', ev => {
   const a = ev.target.closest && ev.target.closest('a[href^="/api/documents/"]');
