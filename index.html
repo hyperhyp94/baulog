@@ -606,11 +606,16 @@ async function ladeProjekt(pid) {
     d.documents.forEach(x => docs.set(x.id, x));
   });
   docListen.forEach(r => r.documents.forEach(x => docs.set(x.id, x)));
+  const namen = [...new Set(zeiten.map(e => e.person).filter(Boolean))];
+  const guthaben = Object.fromEntries(await Promise.all(namen.map(async n => {
+    try { return [n, await api('GET', `/api/projects/${pid}/guthaben?person=${encodeURIComponent(n)}`)]; }
+    catch (e) { return [n, { saldo: 0, einzahlungen: [] }]; }
+  })));
   const trades = {};
   siteDetails.forEach((sd, i) => { trades[sites[i].id] = sd.trades; });
 
   P = {
-    pid, project: pd.project, sites, trades, tasks, zeiten, materialien,
+    pid, project: pd.project, sites, trades, tasks, zeiten, materialien, guthaben,
     bons: Object.fromEntries((bonListe.receipts || []).map(b => [b.id, b])),
     bonOffen: vorher ? vorher.bonOffen : new Set(),
     docs: [...docs.values()].sort((a, b) => (a.created_at < b.created_at ? 1 : -1)),
@@ -700,7 +705,7 @@ function summen(liste) {
 // PROJEKTSEITE
 // ============================================================
 async function zeigeProjekt(pid, tab) {
-  if (!['logbuch', 'aufgaben', 'belege', 'auswertung'].includes(tab)) tab = 'logbuch';
+  if (!['logbuch', 'aufgaben', 'belege', 'abrechnen', 'auswertung'].includes(tab)) tab = 'logbuch';
   if (!P || P.pid !== pid) {
     $('#view').innerHTML = '<div class="leer">Projekt wird geladen…</div>';
     P = null;
@@ -756,11 +761,13 @@ function zeichneProjekt() {
       ${tabLink('logbuch', 'Logbuch', alle.length)}
       ${tabLink('aufgaben', 'Aufgaben', nAufg)}
       ${tabLink('belege', 'Fotos &amp; Belege', nDocs)}
+      ${tabLink('abrechnen', 'Abrechnen')}
       ${tabLink('auswertung', 'Auswertung')}
     </nav>
     <div id="tab-inhalt">${
       P.tab === 'aufgaben' ? htmlAufgaben()
       : P.tab === 'belege' ? htmlBelege()
+      : P.tab === 'abrechnen' ? htmlAbrechnen()
       : P.tab === 'auswertung' ? htmlAuswertung()
       : htmlLogbuch(alle)
     }</div>`;
@@ -1103,7 +1110,7 @@ function htmlAuswertung() {
       ${pListe.map(p => `<tr><td>${esc(p.name)}</td><td class="r">${zahl(p.std)}</td>
         ${sf.gesamt ? `<td class="r">${euro(p.anfahrt)}</td>` : ''}<td class="r">${euro(p.kosten)}</td>
         <td class="r">${euro(p.offen)}</td>
-        <td class="r">${p.offeneIds.length ? `<button class="linkbtn" data-person="${esc(p.name)}" onclick="personAuszahlung(this.dataset.person)">auszahlen</button>` : '✓'}</td></tr>`).join('')}
+        <td class="r">${p.offeneIds.length ? `<button class="linkbtn" data-person="${esc(p.name)}" onclick="formAbrechnen(this.dataset.person)">abrechnen</button>` : '✓'}</td></tr>`).join('')}
     </table></div>` : ''}
 
     <h2>Kosten je Aufgabe</h2>
@@ -1125,6 +1132,105 @@ function personRestOffen(name) {
   const liste = P.zeiten.filter(e => ids.includes(e.id));
   const betrag = r2(liste.reduce((a, e) => a + e.hours * e.hourly_rate + (e.travel_cost || 0) - (e.paid_amount || 0), 0));
   return { ids, betrag };
+}
+
+// ============================================================
+// ABRECHNEN: Pauschale Auszahlung an eine Person
+// Verrechnet mit offenen Stunden (älteste zuerst); was übrig bleibt, wird der
+// Person als Guthaben gutgeschrieben und mit künftigen Stunden automatisch verrechnet.
+// ============================================================
+function abrPersonen() {
+  const m = new Map();
+  P.zeiten.forEach(e => {
+    const k = e.person; if (!k) return;
+    const betrag = r2(e.hours * e.hourly_rate + (e.travel_cost || 0));
+    const gez = e.paid ? betrag : r2(e.paid_amount || 0);
+    const p = m.get(k) || { name: k, std: 0, kosten: 0, offen: 0, offenStd: 0, tage: [] };
+    p.std += e.hours; p.kosten += betrag;
+    if (!e.paid) { p.offen += betrag - gez; p.offenStd += e.hours * (1 - gez / (betrag || 1)); p.tage.push(e.work_date || lokalesDatum(e.created_at)); }
+    m.set(k, p);
+  });
+  return [...m.values()].map(p => ({ ...p, offen: r2(p.offen), kosten: r2(p.kosten),
+    guthaben: r2(((P.guthaben || {})[p.name] || {}).saldo || 0), tage: p.tage.sort() }))
+    .sort((a, b) => b.offen - a.offen || a.name.localeCompare(b.name));
+}
+
+function htmlAbrechnen() {
+  const liste = abrPersonen();
+  if (!liste.length) return `<div class="leer"><p>Noch keine Stunden erfasst.</p></div>`;
+  const zeilen = liste.map(p => `<tr>
+      <td><b>${esc(p.name)}</b>${p.tage.length ? `<div class="muted" style="font-size:12px">offen ${datumKurz(p.tage[0])}${p.tage.length > 1 ? ' – ' + datumKurz(p.tage[p.tage.length - 1]) : ''}</div>` : ''}</td>
+      <td class="r">${zahl(r2(p.offenStd))} Std.</td>
+      <td class="r">${p.offen > 0.004 ? `<b>${euro(p.offen)}</b>` : '✓'}</td>
+      <td class="r">${p.guthaben > 0.004 ? `<span style="color:var(--green)">${euro(p.guthaben)}</span>` : '–'}</td>
+      <td class="r"><button class="klein" data-person="${esc(p.name)}" onclick="formAbrechnen(this.dataset.person)">Auszahlung</button></td></tr>`).join('');
+  const einz = liste.flatMap(p => (((P.guthaben || {})[p.name] || {}).einzahlungen || []).map(x => ({ ...x, person: p.name })))
+    .sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+  return `
+    <p class="hinweis" style="margin-top:0">Pauschale Auszahlung eintragen: Sie wird mit den offenen Stunden der Person
+      verrechnet – älteste zuerst. Ist sie höher als offen, bleibt der Rest als <b>Guthaben</b> stehen und
+      wird mit den nächsten Stunden automatisch verrechnet.</p>
+    <button onclick="formAbrechnen()" style="margin-bottom:12px">💶 Auszahlung buchen</button>
+    <div class="scrollx"><table>
+      <tr><th>Person</th><th class="r">offen</th><th class="r">offen €</th><th class="r">Guthaben</th><th></th></tr>
+      ${zeilen}
+    </table></div>
+    ${einz.length ? `<h2>Bisherige Auszahlungen</h2><div class="scrollx"><table>
+      <tr><th>Datum</th><th>Person</th><th class="r">Betrag</th><th>Notiz</th></tr>
+      ${einz.map(x => `<tr><td>${datumKurz(lokalesDatum(x.created_at))}</td><td>${esc(x.person)}</td>
+        <td class="r">${euro(x.betrag)}</td><td>${esc(x.notiz || '')}</td></tr>`).join('')}
+    </table></div>` : ''}`;
+}
+
+function formAbrechnen(person) {
+  const liste = abrPersonen();
+  const namen = [...new Set([...liste.map(p => p.name),
+    ...App.persons.filter(p => p.active).map(p => p.name)])];
+  const wahl = person || (liste.find(p => p.offen > 0) || liste[0] || {}).name || namen[0] || '';
+  openModal(`${modalKopf('Auszahlung buchen')}
+    <div class="modal-body">
+      <label for="abr-person">Person</label>
+      <select id="abr-person">${namen.map(n => `<option ${n === wahl ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>
+      <div id="abr-stand" class="unterfeld"></div>
+      <label for="abr-betrag">Ausgezahlter Betrag (€)</label>
+      <input id="abr-betrag" inputmode="decimal" placeholder="z. B. 500" autofocus>
+      <label for="abr-notiz">Notiz (optional)</label>
+      <input id="abr-notiz" placeholder="z. B. bar auf der Baustelle">
+      <div id="abr-vorschau" class="summe" style="display:block"></div>
+    </div>
+    <div class="modal-fuss"><button class="hell" onclick="closeModal()">Abbrechen</button>
+      <span class="spacer"></span><button class="gruen" id="abr-ok">Auszahlung verbuchen</button></div>`);
+  const stand = () => abrPersonen().find(p => p.name === $('#abr-person').value)
+    || { name: $('#abr-person').value, offen: 0, offenStd: 0, guthaben: r2(((P.guthaben || {})[$('#abr-person').value] || {}).saldo || 0), tage: [] };
+  const zeigen = () => {
+    const p = stand();
+    $('#abr-stand').innerHTML = `Offen: <b>${euro(p.offen)}</b> (${zahl(r2(p.offenStd))} Std.${p.tage.length ? `, ${datumKurz(p.tage[0])} – ${datumKurz(p.tage[p.tage.length - 1])}` : ''})`
+      + (p.guthaben > 0.004 ? `<br>Vorhandenes Guthaben: <b>${euro(p.guthaben)}</b>` : '');
+    const v = parseZahl($('#abr-betrag').value);
+    if (!(v > 0)) { $('#abr-vorschau').innerHTML = ''; return; }
+    const verrechnet = Math.min(v, p.offen);
+    const rest = r2(p.offen - verrechnet), gut = r2(v - verrechnet);
+    $('#abr-vorschau').innerHTML = `<div>Mit offenen Stunden verrechnet: <b>${euro(verrechnet)}</b></div>
+      <div>Danach noch offen: <b>${euro(rest)}</b></div>
+      ${gut > 0.004 ? `<div style="color:var(--green)">Als Guthaben gutgeschrieben: <b>${euro(gut)}</b>
+        – wird mit den nächsten Stunden verrechnet</div>` : ''}`;
+  };
+  $('#abr-person').onchange = zeigen;
+  $('#abr-betrag').oninput = zeigen;
+  zeigen();
+  $('#abr-ok').onclick = () => mitSperre(async () => {
+    const person = $('#abr-person').value;
+    const v = parseZahl($('#abr-betrag').value);
+    if (!person) throw new Error('Bitte eine Person wählen.');
+    if (!(v > 0)) throw new Error('Bitte einen Betrag über 0 eintragen.');
+    const res = await api('POST', `/api/projects/${P.pid}/guthaben`,
+      { person, amount: v, notiz: $('#abr-notiz').value.trim() || 'Auszahlung' });
+    closeModal();
+    showToast(`${euro(v)} an ${person}: ${euro(res.verrechnet)} mit Stunden verrechnet`
+      + (res.saldo > 0.004 ? `, Guthaben jetzt ${euro(res.saldo)}` : ''), 'success');
+    P.tab = 'abrechnen';
+    await neuLaden();
+  });
 }
 
 // (Teil-)Auszahlung: Betrag eingeben, wird auf die offenen Einträge verteilt (älteste zuerst)
