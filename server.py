@@ -23,6 +23,7 @@ from werkzeug.exceptions import HTTPException
 from werkzeug.utils import secure_filename
 
 import db
+import receipts
 
 # ---------------------------------------------------------------------------
 # App-Konfiguration
@@ -1745,7 +1746,38 @@ def api_config():
 
     Liefert NIEMALS den Paperless-Token oder andere Secrets.
     """
-    return _ok(paperless_enabled=_paperless_enabled())
+    return _ok(paperless_enabled=_paperless_enabled(),
+               receipts_enabled=receipts.enabled(CONFIG_PATH))
+
+
+# ---------------------------------------------------------------------------
+# Kassenbon per Kamera auswerten (Claude) — bucht nichts, liefert nur den Vorschlag
+# für die Prüfansicht; gebucht wird über POST /api/tasks/<id>/receipts.
+# ---------------------------------------------------------------------------
+
+_MEDIA_BY_EXT = {".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+                 ".png": "image/png", ".webp": "image/webp"}
+
+
+@app.route("/api/receipts/analyze", methods=["POST"])
+def api_receipts_analyze():
+    """multipart: images (1–10 Fotos eines Belegs, von oben nach unten, mit Überlappung)."""
+    files = request.files.getlist("images")
+    if not files:
+        return _err("Keine Bilder im Feld 'images'.")
+    if len(files) > receipts.MAX_IMAGES:
+        return _err(f"Maximal {receipts.MAX_IMAGES} Bilder pro Beleg.")
+    images = []
+    for f in files:
+        media = _MEDIA_BY_EXT.get(Path(secure_filename(f.filename or "")).suffix.lower())
+        if not media:
+            return _err("Nur JPEG, PNG oder WebP erlaubt.")
+        images.append((f.read(), media))
+    try:
+        result = receipts.analyze(images, CONFIG_PATH)
+    except receipts.ReceiptError as exc:
+        return _err(str(exc), exc.status)
+    return _ok(beleg=result)
 
 
 # ---------------------------------------------------------------------------

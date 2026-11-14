@@ -729,6 +729,7 @@ function zeichneProjekt() {
     <div class="aktionsleiste">
       <button onclick="formZeit()"><span class="plus">+</span> Stunden</button>
       <button onclick="formMaterial()"><span class="plus">+</span> Material</button>
+      ${App.receipts ? `<button onclick="bonStart()">📷 Kassenbon</button>` : ''}
       <button onclick="formBeleg()"><span class="plus">+</span> Foto/Beleg</button>
       <button class="hell nur-desktop" onclick="formAufgabe()"><span class="plus">+</span> Aufgabe</button>
     </div>
@@ -1460,6 +1461,200 @@ function speichereBeleg() {
 }
 
 // ============================================================
+// KASSENBON PER KAMERA (Fotos → Claude-Auswertung → Prüfen → Bon buchen)
+// ============================================================
+const Bon = { fotos: [], erg: null };
+
+// Verkleinert auf lange Kante 2000 px (JPEG 85 %); EXIF-Drehung wird berücksichtigt.
+async function bonVerkleinern(file) {
+  let bmp;
+  try { bmp = await createImageBitmap(file, { imageOrientation: 'from-image' }); }
+  catch { return file; }
+  const f = Math.min(1, 2000 / Math.max(bmp.width, bmp.height));
+  const c = document.createElement('canvas');
+  c.width = Math.round(bmp.width * f); c.height = Math.round(bmp.height * f);
+  c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+  return (await new Promise(r => c.toBlob(r, 'image/jpeg', 0.85))) || file;
+}
+
+function bonStart() {
+  Bon.fotos.forEach(f => URL.revokeObjectURL(f.url));
+  Bon.fotos = []; Bon.erg = null;
+  bonFotos();
+}
+
+function bonFotos() {
+  const n = Bon.fotos.length;
+  openModal(`${modalKopf('Kassenbon fotografieren')}
+    <div class="modal-body">
+      <p class="hinweis" style="margin-top:0">Langen Bon von oben nach unten in Abschnitten fotografieren –
+        jedes Foto zeigt die letzte Zeile des vorigen noch mit. Max. 10 Fotos.</p>
+      <div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:10px;">
+        ${Bon.fotos.map((f, i) => `<div style="width:76px">
+          <img src="${f.url}" alt="Foto ${i + 1}" style="width:76px; height:100px; object-fit:cover; border:1px solid var(--line); display:block">
+          <div style="display:flex; gap:2px; margin-top:2px">
+            <button type="button" class="hell klein" style="flex:1; padding:2px" onclick="bonVerschieben(${i})" ${i ? '' : 'disabled'} aria-label="nach vorn">◀</button>
+            <button type="button" class="rot klein" style="flex:1; padding:2px" onclick="bonFotoWeg(${i})" aria-label="Foto löschen">✕</button>
+          </div></div>`).join('') || '<p class="muted">Noch keine Fotos.</p>'}
+      </div>
+      <input id="bon-kamera" type="file" accept="image/*" capture="environment" class="hidden" onchange="bonFotoNeu(this)">
+      <input id="bon-galerie" type="file" accept="image/*" multiple class="hidden" onchange="bonFotoNeu(this)">
+      <div style="display:flex; gap:8px; margin-top:12px; flex-wrap:wrap">
+        <button type="button" onclick="$('#bon-kamera').click()" ${n >= 10 ? 'disabled' : ''}>📷 ${n ? 'Nächster Abschnitt' : 'Foto aufnehmen'}</button>
+        <button type="button" class="hell" onclick="$('#bon-galerie').click()">Aus Galerie</button>
+      </div>
+    </div>
+    <div class="modal-fuss"><button class="hell" onclick="closeModal()">Abbrechen</button>
+      <span class="spacer"></span>
+      <button id="bon-los" onclick="bonAuswerten()" ${n ? '' : 'disabled'}>Auswerten (${n})</button></div>`);
+  if (n) modalGeaendert = true;
+}
+
+async function bonFotoNeu(input) {
+  for (const file of [...(input.files || [])]) {
+    if (Bon.fotos.length >= 10) { showError('Maximal 10 Fotos pro Bon.'); break; }
+    const blob = await bonVerkleinern(file);
+    Bon.fotos.push({ blob, url: URL.createObjectURL(blob) });
+  }
+  bonFotos();
+}
+function bonFotoWeg(i) { URL.revokeObjectURL(Bon.fotos[i].url); Bon.fotos.splice(i, 1); bonFotos(); }
+function bonVerschieben(i) { [Bon.fotos[i - 1], Bon.fotos[i]] = [Bon.fotos[i], Bon.fotos[i - 1]]; bonFotos(); }
+
+async function bonAuswerten() {
+  const knopf = $('#bon-los');
+  knopf.disabled = true; knopf.textContent = 'Wird gelesen … (bis 1 Min.)';
+  const fd = new FormData();
+  Bon.fotos.forEach((f, i) => fd.append('images', f.blob, `bon_${i + 1}.jpg`));
+  try {
+    const res = await fetch('/api/receipts/analyze', { method: 'POST', body: fd });
+    let json; try { json = await res.json(); } catch { json = {}; }
+    if (!res.ok || json.error) throw new Error(json.error || 'Fehler ' + res.status);
+    Bon.erg = json.beleg;
+    bonPruefen();
+  } catch (e) {
+    showError(e.message);
+    knopf.disabled = false; knopf.textContent = 'Nochmal auswerten';
+  }
+}
+
+function bonPruefen() {
+  const e = Bon.erg, merk = gemerkt();
+  const rabatt = e.rabatte.reduce((s, r) => s + r.betrag, 0);
+  openModal(`${modalKopf('Kassenbon prüfen')}
+    <div class="modal-body">
+      <div class="grid2">
+        <div><label for="bon-markt">Markt / Händler</label><input id="bon-markt" value="${esc(e.haendler || '')}"></div>
+        <div><label for="bon-datum">Kaufdatum</label><input id="bon-datum" type="date" value="${esc(e.datum || '')}"></div>
+      </div>
+      ${e.hinweise.length ? `<p class="hinweis" style="color:var(--red)">⚠ ${e.hinweise.map(esc).join('<br>⚠ ')}</p>` : ''}
+      <label>Positionen (Haken weg = nicht buchen)</label>
+      <div class="scrollx"><table>
+        <tr><th></th><th>Was</th><th>Menge</th><th>Einh.</th><th>€/Einh.</th></tr>
+        ${e.positionen.map((p, i) => `<tr data-bonpos="${i}">
+          <td><input type="checkbox" class="bp-an" checked onchange="bonSumme()" style="width:auto; min-height:0"></td>
+          <td><input class="bp-name" value="${esc(p.name)}" style="min-width:150px"></td>
+          <td><input class="bp-qty" inputmode="decimal" value="${zahlEin(p.menge)}" style="width:64px" oninput="bonSumme()"></td>
+          <td><input class="bp-unit" value="${esc(p.einheit || '')}" style="width:56px" list="einheiten"></td>
+          <td><input class="bp-preis" inputmode="decimal" value="${zahlEin(p.einzelpreis)}" style="width:76px" oninput="bonSumme()"></td>
+        </tr>`).join('')}
+      </table></div>
+      <datalist id="einheiten">${EINHEITEN.map(u => `<option value="${u}">`).join('')}</datalist>
+      <div class="grid2">
+        <div><label for="bon-rabatt">Rabatte (€, anteilig verteilt)</label>
+          <input id="bon-rabatt" inputmode="decimal" value="${zahlEin(r2(rabatt))}" oninput="bonSumme()"></div>
+        <div><label for="bon-total">Gesamtsumme laut Bon (€)</label>
+          <input id="bon-total" inputmode="decimal" value="${e.gesamt != null ? zahlEin(e.gesamt) : ''}" oninput="bonSumme()"></div>
+      </div>
+      <div class="summe"><span>Positionen</span><b id="bon-summe">–</b></div>
+      <p class="hinweis" id="bon-abgleich"></p>
+      <label style="display:flex; gap:8px; align-items:center; font-weight:normal">
+        <input type="checkbox" id="bon-sammel" style="width:auto; min-height:0" onchange="bonSumme()"> Nur als ein Sammelposten buchen</label>
+      ${aufgabenAuswahl(merk.task)}
+      <label>Rechnung</label>${seg('billed', 1, [[1, 'Mit Rechnung'], [0, 'Ohne Rechnung']])}
+      <label>Schon bezahlt?</label>${seg('bonpaid', 1, [[0, 'Noch offen'], [1, 'Bezahlt']])}
+    </div>
+    <div class="modal-fuss"><button class="hell" onclick="bonFotos()">← Fotos</button>
+      <span class="spacer"></span><button onclick="bonBuchen()">Bon buchen</button></div>`);
+  modalGeaendert = true;
+  bonSumme();
+}
+
+// Positionen inkl. anteilig verteiltem Rabatt; Rundungsrest landet auf der größten Zeile,
+// damit die Serverprüfung (Summe = Gesamtsumme ±0,02 €) zuverlässig passt.
+function bonPositionen() {
+  const markt = $('#bon-markt').value.trim(), datum = $('#bon-datum').value;
+  const rabatt = -Math.abs(parseZahl($('#bon-rabatt').value) || 0);
+  let pos = [...document.querySelectorAll('tr[data-bonpos]')]
+    .filter(tr => tr.querySelector('.bp-an').checked)
+    .map(tr => ({ name: tr.querySelector('.bp-name').value.trim(),
+                  qty: parseZahl(tr.querySelector('.bp-qty').value),
+                  unit: tr.querySelector('.bp-unit').value.trim() || null,
+                  unit_price: parseZahl(tr.querySelector('.bp-preis').value) }));
+  const brutto = pos.reduce((s, p) => s + (p.qty || 0) * (p.unit_price || 0), 0);
+  const ziel = r2(Math.max(0, brutto + rabatt));
+  if ($('#bon-sammel').checked) {
+    return { ziel, pos: pos.length ? [{ name: `Einkauf ${markt || ''} ${datum ? datumKurz(datum) : ''}`.replace(/\s+/g, ' ').trim(),
+                                         qty: 1, unit: 'Pauschal', unit_price: ziel }] : [] };
+  }
+  if (rabatt && brutto > 0) {
+    const f = ziel / brutto;
+    pos = pos.map(p => ({ ...p, unit_price: Math.round(p.unit_price * f * 10000) / 10000 }));
+    const rest = r2(ziel - pos.reduce((s, p) => s + r2(p.qty * p.unit_price), 0));
+    if (rest && pos.length) {
+      const g = pos.reduce((a, p) => (p.qty * p.unit_price > a.qty * a.unit_price ? p : a));
+      g.unit_price = Math.round((g.unit_price + rest / g.qty) * 10000) / 10000;
+    }
+  }
+  return { ziel, pos };
+}
+
+function bonSumme() {
+  const { ziel } = bonPositionen();
+  const total = parseZahl($('#bon-total').value);
+  $('#bon-summe').textContent = euro(ziel);
+  const el = $('#bon-abgleich');
+  if (!(total >= 0)) { el.textContent = 'Bitte die Gesamtsumme vom Bon eintragen.'; el.style.color = 'var(--red)'; return; }
+  const diff = r2(ziel - total);
+  el.style.color = Math.abs(diff) <= 0.02 ? 'var(--green, green)' : 'var(--red)';
+  el.textContent = Math.abs(diff) <= 0.02 ? '✓ passt zur Gesamtsumme vom Bon'
+    : `Differenz ${euro(diff)} zur Bon-Summe – fehlt eine Zeile zwischen zwei Fotos? Ohne Übereinstimmung wird nicht gebucht.`;
+}
+
+function bonBuchen() {
+  return mitSperre(async () => {
+    const store = $('#bon-markt').value.trim();
+    const purchase_date = $('#bon-datum').value;
+    const total = parseZahl($('#bon-total').value);
+    if (!store) throw new Error('Bitte den Markt / Händler eintragen.');
+    if (!purchase_date) throw new Error('Bitte das Kaufdatum eintragen.');
+    if (!(total >= 0)) throw new Error('Bitte die Gesamtsumme vom Bon eintragen.');
+    const { pos } = bonPositionen();
+    if (!pos.length) throw new Error('Keine Position ausgewählt.');
+    if (pos.some(p => !p.name || !(p.qty > 0) || !(p.unit_price >= 0)))
+      throw new Error('Jede Position braucht Bezeichnung, Menge und Preis.');
+    const taskId = await aufgabeAusAuswahl();
+    merke({ task: String(taskId) });
+    const r = await api('POST', `/api/tasks/${taskId}/receipts`, {
+      store, purchase_date, total, positions: pos, billed: segWert('billed'), paid: segWert('bonpaid') });
+    const fehler = [];
+    for (const [i, f] of Bon.fotos.entries()) {
+      const fd = new FormData();
+      fd.append('file', f.blob, `bon_${purchase_date}_${i + 1}.jpg`);
+      try {
+        const res = await fetch(`/api/receipts/${r.id}/document`, { method: 'POST', body: fd });
+        if (!res.ok) fehler.push(`Foto ${i + 1}: Fehler ${res.status}`);
+      } catch (e) { fehler.push(`Foto ${i + 1}: ${e.message}`); }
+    }
+    closeModal();
+    showToast(`Bon gebucht: ${pos.length} ${pos.length === 1 ? 'Position' : 'Positionen'}, ${euro(total)}`, 'success');
+    fehler.forEach(m => showError('Bon gebucht, aber ' + m));
+    Bon.fotos.forEach(f => URL.revokeObjectURL(f.url)); Bon.fotos = [];
+    await neuLaden();
+  });
+}
+
+// ============================================================
 // FORMULAR: AUFGABE
 // ============================================================
 function formAufgabe(id) {
@@ -1739,6 +1934,7 @@ function loeschePerson(id) {
   try {
     const [cfg] = await Promise.all([api('GET', '/api/config'), ladePersonen()]);
     App.paperless = !!cfg.paperless_enabled;
+    App.receipts = !!cfg.receipts_enabled;
   } catch (e) { showError(e.message); }
   route();
 })();
