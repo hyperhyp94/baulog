@@ -432,6 +432,30 @@ def _opencode(images, cfg) -> str:
     return (ch.get("message") or {}).get("content") or ""
 
 
+def text_anfrage(config_path: str, system: str, frage: str, max_tokens: int = 2500) -> str:
+    """Reine Text-Anfrage an das unter ⚙ KI eingestellte Modell (für die Frage in normaler Sprache)."""
+    cfg = load_config(config_path)
+    if not cfg["api_key"]:
+        raise ReceiptError("KI nicht eingerichtet – unter ⚙ KI einen API-Key eintragen.", 503)
+    if cfg["anbieter"] == "opencode-go":
+        r = _opencode_post(cfg, {"model": cfg["model"], "max_tokens": max_tokens,
+                                 "messages": [{"role": "system", "content": system},
+                                              {"role": "user", "content": frage}]}, 120)
+        if r.status_code != 200:
+            raise ReceiptError(f"OpenCode-Fehler {r.status_code}: {_fehlertext(r)[:300]}", 502)
+        return ((r.json().get("choices") or [{}])[0].get("message") or {}).get("content") or ""
+    try:
+        resp = _client(cfg["api_key"]).messages.create(
+            model=cfg["model"], max_tokens=max_tokens, system=system,
+            messages=[{"role": "user", "content": frage}])
+    except Exception as exc:
+        msg = getattr(exc, "message", None) or str(exc)
+        if "credit" in msg.lower():
+            raise ReceiptError("Anthropic: kein Guthaben mehr auf dem Konto.", 502)
+        raise ReceiptError(f"Anthropic-API Fehler: {msg[:300]}", 502)
+    return "".join(b.text for b in resp.content if getattr(b, "type", None) == "text")
+
+
 def verbindung_testen(config_path: str) -> str:
     """Kurzer Text-Aufruf zum Prüfen von Key/Modell."""
     cfg = load_config(config_path)

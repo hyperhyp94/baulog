@@ -2413,12 +2413,15 @@ async function zeigeSuche(q) {
   $('#view').innerHTML = `<div class="listenkopf"><div><h1>Suche</h1>
       <div class="muted">Material, Preise und Belege in allen Projekten – plus Volltext in Paperless</div></div></div>
     <form id="such-form" style="display:flex; gap:8px; margin:8px 0 14px">
-      <input id="such-q" type="search" placeholder="z. B. SH 45, Tiefgrund, Hornbach …" value="${esc(q || '')}" autofocus style="flex:1">
-      <button>Suchen</button></form>
+      <input id="such-q" type="search" placeholder="z. B. SH 45 – oder eine Frage: Was hat Spachtel im November gekostet?" value="${esc(q || '')}" autofocus style="flex:1">
+      <button>Suchen</button><button type="button" class="hell" onclick="kiFrage()">🤖 Fragen</button></form>
+    <div id="ki-antwort"></div>
     <div id="such-erg"></div>`;
   $('#such-form').onsubmit = ev => {
     ev.preventDefault();
     const v = $('#such-q').value.trim();
+    // Sieht es wie eine Frage aus, gleich die KI fragen
+    if (/\?$/.test(v) || /^(was|wie|wann|wo|wer|welche[rsmn]?|wieviel|wie viel|zeig|liste|summe|hat|haben|gib)\b/i.test(v)) return kiFrage();
     if (v) location.hash = '#/suche/' + encodeURIComponent(v);
   };
   if (!q) return;
@@ -2454,6 +2457,25 @@ async function zeigeSuche(q) {
   $('#such-erg').innerHTML = teile.join('');
   App.suchTreffer = d.treffer;
 }
+async function kiFrage() {
+  const frage = $('#such-q').value.trim();
+  const box = $('#ki-antwort');
+  if (frage.length < 3) return showError('Bitte eine Frage eingeben.');
+  box.innerHTML = '<div class="box" style="padding:12px">🤖 Denke nach … (einige Sekunden)</div>';
+  try {
+    const r = await api('POST', '/api/frage', { frage });
+    const html = esc(r.antwort)
+      .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
+      .replace(/^- (.*)$/gm, '• $1');
+    box.innerHTML = `<div class="box" style="padding:12px 14px; border-left:4px solid var(--green)">
+      <div class="muted" style="font-size:12px; margin-bottom:6px">🤖 Antwort (${esc(r.modell)}) auf: „${esc(frage)}“</div>
+      <div style="white-space:pre-line; line-height:1.45">${html}</div>
+      <div class="muted" style="font-size:11px; margin-top:8px">KI-Antwort aus den Baulog-Daten – bei wichtigen Beträgen den Beleg prüfen.</div></div>`;
+  } catch (e) {
+    box.innerHTML = `<p style="color:var(--red)">${esc(e.message)}</p>`;
+  }
+}
+
 function sucheBeleg(i) {
   const t = App.suchTreffer[i];
   belegZeigen(`/api/documents/${t.beleg_dateien[0]}/file`, t.beleg_dateien.map(id => `/api/documents/${id}/file`),

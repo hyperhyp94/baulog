@@ -2298,6 +2298,93 @@ def api_suche():
     return _ok(q=q, treffer=treffer[:200], uebersicht=uebersicht, paperless=paperless)
 
 
+def _frage_kontext() -> str:
+    """Alle Baulog-Daten kompakt als Tabellen (Material, Stunden, Belege, Auszahlungen)."""
+    conn = db.get_conn()
+    try:
+        q = lambda sql: conn.execute(sql).fetchall()
+        zeilen = ["## FERTIG BERECHNETE SUMMEN (diese Zahlen verwenden, nicht selbst neu addieren)"]
+        zeilen.append("### Stunden je Person, Projekt und Monat (person | projekt | monat | tage | stunden | betrag | bezahlt | offen)")
+        for r in q("SELECT te.person, p.name AS projekt, substr(COALESCE(te.work_date, te.created_at),1,7) AS monat, "
+                   "COUNT(*) AS tage, SUM(te.hours) AS std, "
+                   "SUM(te.hours*te.hourly_rate + COALESCE(te.travel_cost,0)) AS betrag, "
+                   "SUM(CASE WHEN te.paid THEN te.hours*te.hourly_rate + COALESCE(te.travel_cost,0) ELSE COALESCE(te.paid_amount,0) END) AS bez "
+                   "FROM time_entries te JOIN tasks t ON t.id=te.task_id JOIN sites s ON s.id=t.site_id "
+                   "JOIN projects p ON p.id=s.project_id GROUP BY 1,2,3 ORDER BY 1,2,3"):
+            zeilen.append(f"{r['person']} | {r['projekt']} | {r['monat']} | {r['tage']} | {r['std']:g} | "
+                          f"{r['betrag']:.2f} | {r['bez']:.2f} | {r['betrag'] - r['bez']:.2f}")
+        zeilen.append("### Material je Projekt und Monat (projekt | monat | positionen | betrag | bezahlt | offen)")
+        for r in q("SELECT p.name AS projekt, substr(COALESCE(m.purchase_date, m.created_at),1,7) AS monat, COUNT(*) AS n, "
+                   "SUM(m.qty*m.unit_price) AS betrag, "
+                   "SUM(CASE WHEN m.paid THEN m.qty*m.unit_price ELSE COALESCE(m.paid_amount,0) END) AS bez "
+                   "FROM materials m JOIN tasks t ON t.id=m.task_id JOIN sites s ON s.id=t.site_id "
+                   "JOIN projects p ON p.id=s.project_id GROUP BY 1,2 ORDER BY 1,2"):
+            zeilen.append(f"{r['projekt']} | {r['monat']} | {r['n']} | {r['betrag']:.2f} | {r['bez']:.2f} | {r['betrag'] - r['bez']:.2f}")
+        zeilen.append("### Guthaben-Stand je Person (projekt | person | eingezahlt | verrechnet | noch_guthaben)")
+        for r in q("SELECT p.name AS projekt, g.person, SUM(g.betrag) AS ein, "
+                   "COALESCE((SELECT SUM(v.betrag) FROM guthaben_verbrauch v JOIN guthaben g2 ON g2.id=v.guthaben_id "
+                   "WHERE g2.project_id=g.project_id AND lower(g2.person)=lower(g.person)),0) AS verr "
+                   "FROM guthaben g JOIN projects p ON p.id=g.project_id GROUP BY g.project_id, lower(g.person)"):
+            zeilen.append(f"{r['projekt']} | {r['person']} | {r['ein']:.2f} | {r['verr']:.2f} | {r['ein'] - r['verr']:.2f}")
+        zeilen.append("")
+        zeilen.append("## Projekte (id | name | notiz)")
+        zeilen += [f"{r['id']} | {r['name']} | {r['note'] or ''}" for r in q("SELECT * FROM projects")]
+        zeilen.append("\n## Aufgaben (id | projekt | aufgabe | status)")
+        zeilen += [f"{r['id']} | {r['projekt']} | {r['title']} | {r['status']}" for r in q(
+            "SELECT t.*, p.name AS projekt FROM tasks t JOIN sites s ON s.id=t.site_id JOIN projects p ON p.id=s.project_id")]
+        zeilen.append("\n## Material (datum | projekt | aufgabe | was | menge | einheit | einzelpreis_brutto | betrag | markt | beleg | bezahlt | mit_rechnung)")
+        zeilen += [f"{r['datum']} | {r['projekt']} | {r['aufgabe']} | {r['name']} | {r['qty']:g} | {r['unit'] or ''} | "
+                   f"{r['unit_price']:.2f} | {r['qty'] * r['unit_price']:.2f} | {r['markt'] or ''} | "
+                   f"{('Beleg ' + str(r['beleg_nr'])) if r['beleg_nr'] else ''} | {'ja' if r['paid'] else ('teilweise ' + format(r['paid_amount'] or 0, '.2f') if r['paid_amount'] else 'nein')} | {'ja' if r['billed'] else 'nein'}"
+                   for r in q("SELECT m.*, COALESCE(m.purchase_date, substr(m.created_at,1,10)) AS datum, t.title AS aufgabe, "
+                              "p.name AS projekt, COALESCE(m.store, r.store) AS markt, r.beleg_nr FROM materials m "
+                              "JOIN tasks t ON t.id=m.task_id JOIN sites s ON s.id=t.site_id JOIN projects p ON p.id=s.project_id "
+                              "LEFT JOIN receipts r ON r.id=m.receipt_id ORDER BY datum")]
+        zeilen.append("\n## Stunden (datum | projekt | aufgabe | person | stunden | stundensatz | anfahrt | betrag | bezahlt | mit_rechnung)")
+        zeilen += [f"{r['datum']} | {r['projekt']} | {r['aufgabe']} | {r['person']} | {r['hours']:g} | {r['hourly_rate']:.2f} | "
+                   f"{(r['travel_cost'] or 0):.2f} | {r['hours'] * r['hourly_rate'] + (r['travel_cost'] or 0):.2f} | "
+                   f"{'ja' if r['paid'] else ('teilweise ' + format(r['paid_amount'] or 0, '.2f') if r['paid_amount'] else 'nein')} | {'ja' if r['billed'] else 'nein'}"
+                   for r in q("SELECT te.*, COALESCE(te.work_date, substr(te.created_at,1,10)) AS datum, t.title AS aufgabe, "
+                              "p.name AS projekt FROM time_entries te JOIN tasks t ON t.id=te.task_id JOIN sites s ON s.id=t.site_id "
+                              "JOIN projects p ON p.id=s.project_id ORDER BY datum")]
+        zeilen.append("\n## Belege (projekt | beleg | markt | kaufdatum | gesamt)")
+        zeilen += [f"{r['projekt']} | Beleg {r['beleg_nr']} | {r['store']} | {r['purchase_date']} | {r['total']:.2f}" for r in q(
+            "SELECT r.*, p.name AS projekt FROM receipts r JOIN tasks t ON t.id=r.task_id JOIN sites s ON s.id=t.site_id "
+            "JOIN projects p ON p.id=s.project_id ORDER BY p.name, r.beleg_nr")]
+        zeilen.append("\n## Auszahlungen/Guthaben (datum | projekt | person | betrag | notiz)")
+        zeilen += [f"{r['created_at'][:10]} | {r['projekt']} | {r['person']} | {r['betrag']:.2f} | {r['notiz'] or ''}" for r in q(
+            "SELECT g.*, p.name AS projekt FROM guthaben g JOIN projects p ON p.id=g.project_id ORDER BY g.created_at")]
+        return "\n".join(zeilen)
+    finally:
+        conn.close()
+
+
+@app.route("/api/frage", methods=["POST"])
+def api_frage():
+    """Frage in normaler Sprache zu allen Baulog-Daten. Body: {"frage": "..."}"""
+    frage = ((request.get_json(silent=True) or {}).get("frage") or "").strip()
+    if len(frage) < 3:
+        return _err("Bitte eine Frage eingeben.")
+    if len(frage) > 500:
+        return _err("Die Frage ist zu lang (max. 500 Zeichen).")
+    system = (
+        "Du beantwortest Fragen zu einem Bautagebuch (Baulog) eines Handwerkers. Heute ist "
+        f"{date.today().strftime('%d.%m.%Y')}. Unten stehen ALLE Daten als Tabellen. Beträge sind Euro brutto.\n"
+        "Regeln: Antworte kurz auf Deutsch. Rechne genau nach (Summen, Mengen, Durchschnitt) und nenne das Ergebnis "
+        "zuerst. Nenne bei Material die Belege als 'Beleg N' mit Projekt und Datum, damit man sie findet. "
+        "Wenn etwas nicht in den Daten steht, sag das ehrlich – nichts erfinden. "
+        "WICHTIG: Für Summen (Stunden, Beträge, bezahlt, offen) die FERTIG BERECHNETEN SUMMEN verwenden; mehrere Zeilen "
+        "daraus darfst du addieren. Auszahlungen/Guthaben sind im Bezahlt-Status der Einträge SCHON verrechnet – "
+        "niemals noch einmal von 'offen' abziehen. 'offen' ist der wirklich noch zu zahlende Betrag. "
+        "Formatierung: einfache Sätze und "
+        "kurze Aufzählungen mit '- ', keine Tabellen, kein Markdown außer **fett**.\n\n" + _frage_kontext())
+    try:
+        antwort = receipts.text_anfrage(CONFIG_PATH, system, frage)
+    except receipts.ReceiptError as exc:
+        return _err(str(exc), exc.status)
+    return _ok(antwort=antwort.strip(), modell=receipts.load_config(CONFIG_PATH)["model"])
+
+
 # ---------------------------------------------------------------------------
 # Einstiegspunkt
 # ---------------------------------------------------------------------------
