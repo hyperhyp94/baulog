@@ -270,6 +270,7 @@
       <a href="#/" data-nav="projekte">Projekte</a>
       <a href="#/personen" data-nav="personen">Personen</a>
       <a href="#/verlauf" data-nav="verlauf">Verlauf</a>
+      <a href="javascript:void 0" onclick="kiEinstellungen()" title="KI für Kassenbons einstellen">⚙ KI</a>
     </nav>
   </div>
 </header>
@@ -2113,6 +2114,56 @@ function loeschePerson(id) {
   } catch (e) { showError(e.message); }
   route();
 })();
+
+// ============================================================
+// EINSTELLUNGEN: KI für die Kassenbon-Auswertung
+// ============================================================
+let KI = null;
+async function kiEinstellungen() {
+  try { KI = await api('GET', '/api/ki-einstellungen'); } catch (e) { return showError(e.message); }
+  kiZeichnen(KI.anbieter);
+}
+function kiZeichnen(anbieter) {
+  const a = KI.anbieter_liste.find(x => x.id === anbieter) || KI.anbieter_liste[0];
+  const modelle = a.modelle.includes(a.modell) ? a.modelle : [a.modell, ...a.modelle];
+  openModal(`${modalKopf('KI für Kassenbons')}
+    <div class="modal-body">
+      <label>Anbieter</label>
+      ${seg('ki-anbieter', a.id, KI.anbieter_liste.map(x => [x.id, x.name]))}
+      <label for="ki-modell">Modell</label>
+      <input id="ki-modell" list="ki-modelle" value="${esc(a.modell)}" autocomplete="off">
+      <datalist id="ki-modelle">${modelle.map(m => `<option value="${esc(m)}">`).join('')}</datalist>
+      <p class="hinweis">Aus der Liste wählen oder einen anderen Modellnamen eintippen. Das Modell muss Bilder lesen können.</p>
+      <label for="ki-key">API-Key</label>
+      <input id="ki-key" type="password" autocomplete="off" placeholder="${a.key ? 'gespeichert (' + esc(a.key) + ') – leer lassen = behalten' : 'Key einfügen'}">
+      <p class="hinweis">${a.key ? (a.key_quelle === 'eingetragen' ? 'Key hier eingetragen.' : 'Key kommt aus der Server-Konfiguration.') : 'Noch kein Key vorhanden.'}
+        Der Key bleibt auf dem Pi und wird nie wieder angezeigt.</p>
+      ${a.key_quelle === 'eingetragen' ? `<label style="display:flex; gap:8px; align-items:center; font-weight:normal">
+        <input type="checkbox" id="ki-key-weg" style="width:auto; min-height:0"> Eingetragenen Key löschen</label>` : ''}
+      <p class="hinweis" id="ki-test-erg"></p>
+    </div>
+    <div class="modal-fuss"><button class="hell" onclick="kiSpeichern(true)">Speichern + testen</button>
+      <span class="spacer"></span><button onclick="kiSpeichern(false)">Speichern</button></div>`);
+  document.querySelectorAll('.seg[data-seg="ki-anbieter"] button').forEach(b =>
+    b.addEventListener('click', () => kiZeichnen(b.dataset.v)));
+}
+function kiSpeichern(testen) {
+  return mitSperre(async () => {
+    const weg = $('#ki-key-weg');
+    KI = await api('PUT', '/api/ki-einstellungen', {
+      anbieter: segWert('ki-anbieter'), modell: $('#ki-modell').value.trim(),
+      key: $('#ki-key').value.trim(), key_loeschen: !!(weg && weg.checked) });
+    try { App.receipts = !!(await api('GET', '/api/config')).receipts_enabled; } catch (e) { /* egal */ }
+    if (!testen) { closeModal(); return showToast('KI-Einstellungen gespeichert', 'success'); }
+    kiZeichnen(KI.anbieter);
+    const el = $('#ki-test-erg');
+    el.textContent = 'Teste Verbindung …'; el.style.color = 'var(--grey)';
+    try {
+      const r = await api('POST', '/api/ki-einstellungen/test');
+      el.textContent = '✓ ' + r.meldung; el.style.color = 'var(--green)';
+    } catch (e) { el.textContent = '✗ ' + e.message; el.style.color = 'var(--red)'; }
+  });
+}
 
 // Belege/Fotos in einer Vollbild-Ebene mit Schließen-Knopf zeigen statt die Seite zu verlassen
 // (in der Home-Bildschirm-App gibt es keinen Zurück-Knopf).

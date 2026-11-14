@@ -1850,6 +1850,30 @@ def api_receipts_analyze():
     return _ok(beleg=result)
 
 
+@app.route("/api/ki-einstellungen", methods=["GET"])
+def api_ki_get():
+    """Anbieter/Modell der Belegauswertung — Keys nur maskiert (…abcd)."""
+    return _ok(**receipts.public_settings(CONFIG_PATH))
+
+
+@app.route("/api/ki-einstellungen", methods=["PUT"])
+def api_ki_put():
+    data = request.get_json(silent=True) or {}
+    try:
+        receipts.save_settings(CONFIG_PATH, data)
+    except receipts.ReceiptError as exc:
+        return _err(str(exc), exc.status)
+    return _ok(**receipts.public_settings(CONFIG_PATH))
+
+
+@app.route("/api/ki-einstellungen/test", methods=["POST"])
+def api_ki_test():
+    try:
+        return _ok(meldung=receipts.verbindung_testen(CONFIG_PATH))
+    except receipts.ReceiptError as exc:
+        return _err(str(exc), exc.status)
+
+
 # ---------------------------------------------------------------------------
 # Einstiegspunkt
 # ---------------------------------------------------------------------------
