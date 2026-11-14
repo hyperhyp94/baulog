@@ -47,7 +47,7 @@ app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.local.json")
 
 # Gültige Dokumenttypen
-VALID_DOC_TYPES = {"rechnung", "beleg", "foto"}
+VALID_DOC_TYPES = {"rechnung", "beleg", "foto", "bericht"}
 
 # Gültige Status-Werte für Baustellen und Aufgaben
 VALID_SITE_STATUS = {"aktiv", "abgeschlossen"}
@@ -2166,6 +2166,33 @@ def api_eingang_delete(eid):
     return _ok()
 
 
+def _bericht_archivieren(pid: int, projekt, name: str, daten: bytes) -> None:
+    """Bericht im Projekt (Fotos & Belege, Typ 'bericht') ablegen und an Paperless senden."""
+    sites = db.list_sites({"project_id": pid})
+    site_id = sites[0]["id"] if sites else None
+    doc_id = db.create_document(filename=name, stored_path="", site_id=site_id,
+                                mime="application/pdf", doc_type="bericht")
+    pfad = os.path.join(UPLOADS_DIR, f"{doc_id}_{name}")
+    os.makedirs(UPLOADS_DIR, exist_ok=True)
+    with open(pfad, "wb") as fh:
+        fh.write(daten)
+    db.update_document(doc_id, {"stored_path": pfad})
+    if not _paperless_enabled():
+        return
+    stand = date.today().strftime("%d.%m.%Y")
+    meta = {"title": f"{projekt['name']} · Projektbericht · Stand {stand}", "created": date.today().isoformat(),
+            "store": None, "doc_type_name": "Bericht", "tags": ["Baulog", projekt["name"], "Projektbericht"]}
+    import threading
+
+    def lauf():
+        try:
+            pl_id, pl_url = _paperless_hochladen(pfad, name, "application/pdf", meta, anlegen=True)
+            db.update_document(doc_id, {"paperless_id": pl_id, "paperless_url": pl_url})
+        except Exception as exc:
+            app.logger.warning("Paperless: Bericht %s nicht gesendet: %s", doc_id, exc)
+    threading.Thread(target=lauf, daemon=True).start()
+
+
 @app.route("/api/projects/<int:pid>/bericht.pdf", methods=["GET"])
 def api_projekt_bericht(pid: int):
     """Projektbericht als PDF. Query: fotos=1 hängt Fotos/Belege an."""
@@ -2189,6 +2216,8 @@ def api_projekt_bericht(pid: int):
         with open(ziel, "rb") as fh:
             daten = fh.read()
     name = secure_filename(f"Baulog_{projekt['name']}_{date.today().isoformat()}.pdf") or "Baulog_Bericht.pdf"
+    if request.args.get("archiv") == "1":
+        _bericht_archivieren(pid, projekt, name, daten)
     resp = app.response_class(daten, mimetype="application/pdf")
     resp.headers["Content-Disposition"] = f'inline; filename="{name}"'
     return resp

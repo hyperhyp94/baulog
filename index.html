@@ -991,7 +991,7 @@ async function statusWeiter(id) {
 }
 
 // ---------------- Fotos & Belege ----------------
-const DOC_TYPEN = { foto: 'Foto', beleg: 'Beleg', rechnung: 'Rechnung' };
+const DOC_TYPEN = { foto: 'Foto', beleg: 'Beleg', rechnung: 'Rechnung', bericht: 'Projektbericht' };
 
 function htmlBelege() {
   const docs = P.docs.filter(docImBereich);
@@ -2367,6 +2367,9 @@ function formBericht() {
         Personen, Aufgaben, alle Stunden und Materialpositionen.</p>
       <label style="display:flex; gap:8px; align-items:center; font-weight:normal">
         <input type="checkbox" id="ber-fotos" style="width:auto; min-height:0"> Fotos &amp; Belege anhängen (größere Datei)</label>
+      <label style="display:flex; gap:8px; align-items:center; font-weight:normal">
+        <input type="checkbox" id="ber-archiv" style="width:auto; min-height:0" checked>
+        Archivieren: unter Fotos &amp; Belege ablegen${App.paperless ? ' und an Paperless senden' : ''}</label>
       <p class="hinweis" id="ber-status"></p>
     </div>
     <div class="modal-fuss"><button class="hell" onclick="closeModal()">Abbrechen</button>
@@ -2375,7 +2378,8 @@ function formBericht() {
 
 async function berichtErstellen() {
   const fotos = $('#ber-fotos').checked ? 1 : 0;
-  const url = `/api/projects/${P.pid}/bericht.pdf?fotos=${fotos}`;
+  const archiv = $('#ber-archiv').checked ? 1 : 0;
+  const url = `/api/projects/${P.pid}/bericht.pdf?fotos=${fotos}&archiv=${archiv}`;
   const knopf = $('#ber-los'), st = $('#ber-status');
   knopf.disabled = true; st.textContent = 'Bericht wird erstellt …'; st.style.color = 'var(--grey)';
   try {
@@ -2387,7 +2391,8 @@ async function berichtErstellen() {
     const burl = URL.createObjectURL(blob);
     const teilbar = navigator.canShare && navigator.canShare({ files: [datei] });
     st.style.color = 'var(--green)';
-    st.innerHTML = `✓ Fertig (${blob.size < 1048576 ? Math.max(1, Math.round(blob.size / 1024)) + ' KB' : (blob.size / 1048576).toFixed(1).replace('.', ',') + ' MB'})`;
+    if (archiv) neuLaden().catch(() => {});
+    st.innerHTML = (archiv ? `✓ Archiviert${App.paperless ? ' (Paperless läuft im Hintergrund)' : ''} · ` : '') + `✓ Fertig (${blob.size < 1048576 ? Math.max(1, Math.round(blob.size / 1024)) + ' KB' : (blob.size / 1048576).toFixed(1).replace('.', ',') + ' MB'})`;
     $('#modal-content .modal-fuss').innerHTML = `<a class="btn hell" href="${burl}" download="${esc(name)}">Herunterladen</a>
       <span class="spacer"></span>
       ${teilbar ? '<button id="ber-teilen">Teilen / Sichern</button>' : `<a class="btn" href="${burl}" target="_blank" rel="noopener">Öffnen</a>`}`;

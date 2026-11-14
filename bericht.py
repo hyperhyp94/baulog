@@ -68,7 +68,8 @@ def daten(pid: int) -> dict:
     docs = c.execute(
         "SELECT d.* FROM documents d LEFT JOIN sites s ON s.id = d.site_id "
         "LEFT JOIN tasks t ON t.id = d.task_id LEFT JOIN sites s2 ON s2.id = t.site_id "
-        "WHERE COALESCE(s.project_id, s2.project_id) = ? ORDER BY d.created_at", (pid,)).fetchall()
+        "WHERE COALESCE(s.project_id, s2.project_id) = ? AND COALESCE(d.doc_type, '') <> 'bericht' "
+        "ORDER BY d.created_at", (pid,)).fetchall()
     guthaben = {}
     for r in c.execute(
             "SELECT g.person, ROUND(SUM(g.betrag) - COALESCE((SELECT SUM(v.betrag) FROM guthaben_verbrauch v "
