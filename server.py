@@ -383,6 +383,12 @@ def _handle_unexpected(exc: Exception):
 # Statische Route
 # ---------------------------------------------------------------------------
 
+@app.route("/icons/<path:fname>")
+def app_icons(fname):
+    mime = "application/manifest+json" if fname.endswith(".webmanifest") else None
+    return send_from_directory(os.path.join(os.path.dirname(os.path.abspath(__file__)), "icons"), fname, mimetype=mime)
+
+
 @app.route("/")
 def index():
     """Liefert index.html aus dem Projektverzeichnis."""
