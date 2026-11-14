@@ -659,7 +659,7 @@ function eintraege() {
   }));
   const m = P.materialien.map(x => ({
     art: 'material', id: x.id, task_id: x.task_id, ts: x.created_at,
-    datum: lokalesDatum(x.created_at),
+    datum: x.purchase_date || lokalesDatum(x.created_at),
     betrag: r2(x.qty * x.unit_price), billed: x.billed, paid: x.paid, roh: x,
     gezahlt: x.paid ? r2(x.qty * x.unit_price) : r2(x.paid_amount || 0),
   }));
@@ -822,7 +822,7 @@ function htmlEintrag(e) {
     detail = `${zahl(e.roh.hours)} × ${euro(e.roh.hourly_rate)}${e.anfahrt ? ` + ${euro(e.anfahrt)} Anfahrt` : ''}`;
   } else {
     titel = `<b>${esc(e.roh.name)}</b>`;
-    detail = `${zahl(e.roh.qty)} ${esc(e.roh.unit || '')} × ${euro(e.roh.unit_price)}`;
+    detail = `${zahl(e.roh.qty)} ${esc(e.roh.unit || '')} × ${euro(e.roh.unit_price)}${e.roh.store ? ' · ' + esc(e.roh.store) : ''}`;
   }
   // Die Aufgabe nur nennen, wenn es mehr als eine gibt — sonst ist sie in jeder Zeile gleich
   const unter = [P.tasks.length > 1 ? esc(aufgabeName(e.task_id)) : '', detail,
@@ -1313,7 +1313,7 @@ function loescheZeit(id) {
 function formMaterial(id, vorgabe) {
   const m = id ? P.materialien.find(x => x.id === id) : null;
   const merk = { ...gemerkt(), ...(vorgabe || {}) };
-  const docs = m ? P.docs.filter(d => d.material_id === m.id) : [];
+  const docs = m ? P.docs.filter(d => d.material_id === m.id || (m.receipt_id && d.receipt_id === m.receipt_id)) : [];
 
   openModal(`${modalKopf(m ? 'Material bearbeiten' : 'Material / Kosten erfassen')}
     <div class="modal-body">
@@ -1327,6 +1327,12 @@ function formMaterial(id, vorgabe) {
           <datalist id="einheiten">${EINHEITEN.map(u => `<option value="${u}">`).join('')}</datalist></div>
         <div><label for="f-preis">Preis je Einheit (€)</label>
           <input id="f-preis" inputmode="decimal" value="${m ? zahlEin(m.unit_price) : ''}" placeholder="0,00" oninput="materialSumme()"></div>
+      </div>
+      <div class="grid2">
+        <div><label for="f-markt">Markt / Händler (optional)</label>
+          <input id="f-markt" value="${esc(m ? (m.store || '') : '')}" placeholder="z. B. Hornbach"></div>
+        <div><label for="f-kaufdatum">Kaufdatum (optional)</label>
+          <input id="f-kaufdatum" type="date" value="${esc(m ? (m.purchase_date || '') : '')}"></div>
       </div>
       ${m ? aufgabeFest(m.task_id) : aufgabenAuswahl(merk.task)}
       <label>Rechnung</label>${seg('billed', m ? m.billed : 1, [[1, 'Mit Rechnung'], [0, 'Ohne Rechnung']])}
@@ -1360,7 +1366,9 @@ function speichereMaterial(id, weiter) {
     const unit_price = parseZahl($('#f-preis').value);
     if (!(unit_price >= 0)) throw new Error('Bitte einen Preis eintragen.');
     const body = { name, qty, unit_price, unit: $('#f-einheit').value.trim() || null,
-                   billed: segWert('billed'), ...zahlungWerte() };
+                   billed: segWert('billed'), ...zahlungWerte(),
+                   store: $('#f-markt').value.trim() || null,
+                   purchase_date: $('#f-kaufdatum').value || null };
     const datei = $('#f-datei').files[0];
 
     let mid, taskId;

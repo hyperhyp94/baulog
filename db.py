@@ -32,7 +32,7 @@ def get_conn() -> sqlite3.Connection:
     return conn
 
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 _INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_sites_project ON sites(project_id)",
@@ -261,6 +261,40 @@ def _migrate_v5(conn: sqlite3.Connection) -> None:
         conn.execute("PRAGMA user_version = 5")
 
 
+def _migrate_v6(conn: sqlite3.Connection) -> None:
+    """v5 → v6: Kassenbons — Tabelle 'receipts' (Markt, Kaufdatum, Summe) und Verknüpfung.
+
+    materials: store (Markt), purchase_date (Kaufdatum), receipt_id (Bon).
+    documents: receipt_id (der Bon als Datei hängt am Bon, nicht an einer Einzelposition).
+    """
+    with conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS receipts (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id       INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+                store         TEXT    NOT NULL,
+                purchase_date TEXT    NOT NULL,
+                total         REAL    NOT NULL,
+                created_at    TEXT    NOT NULL
+            )
+        """)
+        cols = [r["name"] for r in conn.execute("PRAGMA table_info(materials)")]
+        if "store" not in cols:
+            conn.execute("ALTER TABLE materials ADD COLUMN store TEXT")
+        if "purchase_date" not in cols:
+            conn.execute("ALTER TABLE materials ADD COLUMN purchase_date TEXT")
+        if "receipt_id" not in cols:
+            conn.execute("ALTER TABLE materials ADD COLUMN receipt_id INTEGER "
+                         "REFERENCES receipts(id) ON DELETE CASCADE")
+        cols = [r["name"] for r in conn.execute("PRAGMA table_info(documents)")]
+        if "receipt_id" not in cols:
+            conn.execute("ALTER TABLE documents ADD COLUMN receipt_id INTEGER "
+                         "REFERENCES receipts(id) ON DELETE CASCADE")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_materials_receipt ON materials(receipt_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_documents_receipt ON documents(receipt_id)")
+        conn.execute("PRAGMA user_version = 6")
+
+
 def init_db() -> None:
     """Legt das Basis-Schema an und führt ausstehende Migrationen aus."""
     conn = get_conn()
@@ -279,6 +313,8 @@ def init_db() -> None:
             _migrate_v4(conn)
         if _user_version(conn) < 5:
             _migrate_v5(conn)
+        if _user_version(conn) < 6:
+            _migrate_v6(conn)
     conn.close()
 
 
@@ -295,8 +331,9 @@ _UPDATE_COLS = {
     "time_entries": {"person", "person_id", "hours", "hourly_rate", "billed", "paid", "work_date",
                      "travel_cost", "paid_amount"},
     "materials":    {"name", "qty", "unit", "unit_price", "billed", "paid",
-                     "paid_amount"},
-    "documents":    {"stored_path", "doc_type", "paperless_id", "paperless_url"},
+                     "paid_amount", "store", "purchase_date"},
+    "documents":    {"stored_path", "doc_type", "paperless_id", "paperless_url", "receipt_id"},
+    "receipts":     {"store", "purchase_date", "total"},
     "persons":      {"name", "hourly_rate", "active", "note"},
 }
 
@@ -1030,6 +1067,9 @@ def create_material(
     unit: str | None = None,
     billed: int = 1,
     paid: int = 0,
+    store: str | None = None,
+    purchase_date: str | None = None,
+    receipt_id: int | None = None,
 ) -> int:
     """
     Legt eine Materialposition an.
@@ -1042,14 +1082,19 @@ def create_material(
     :param unit_price: Einzelpreis in Euro.
     :param unit: Einheit (z. B. 'Stk', 'm²', 'kg', 'l'); optional.
     :param billed: 1 = mit Rechnung, 0 = ohne Rechnung (Standard: 1).
+    :param store: Markt/Händler (z. B. 'Hornbach'); optional.
+    :param purchase_date: Kaufdatum YYYY-MM-DD; optional.
+    :param receipt_id: Bon, zu dem die Position gehört; optional.
     """
     conn = get_conn()
     with conn:
         cur = conn.execute(
             "INSERT INTO materials "
-            "(task_id, name, qty, unit, unit_price, billed, paid, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (task_id, name, qty, unit, unit_price, billed, paid, _now()),
+            "(task_id, name, qty, unit, unit_price, billed, paid, store, purchase_date, "
+            " receipt_id, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (task_id, name, qty, unit, unit_price, billed, paid, store, purchase_date,
+             receipt_id, _now()),
         )
     conn.close()
     return cur.lastrowid
@@ -1100,6 +1145,111 @@ def delete_material(material_id: int) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# CRUD: receipts (Kassenbons)
+# ---------------------------------------------------------------------------
+
+def create_receipt_with_materials(
+    task_id: int,
+    store: str,
+    purchase_date: str,
+    total: float,
+    positions: list[dict],
+    billed: int = 1,
+    paid: int = 0,
+) -> tuple[int, list[int]]:
+    """
+    Legt einen Bon samt allen Positionen in EINER Transaktion an.
+
+    positions: Liste von {name, qty, unit_price, unit?}. Entweder alles oder nichts.
+    Gibt (receipt_id, [material_id, …]) zurück.
+    """
+    conn = get_conn()
+    try:
+        with conn:
+            cur = conn.execute(
+                "INSERT INTO receipts (task_id, store, purchase_date, total, created_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (task_id, store, purchase_date, total, _now()),
+            )
+            rid = cur.lastrowid
+            ids = []
+            for p in positions:
+                c = conn.execute(
+                    "INSERT INTO materials (task_id, name, qty, unit, unit_price, billed, paid, "
+                    "store, purchase_date, receipt_id, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (task_id, p["name"], p["qty"], p.get("unit"), p["unit_price"], billed, paid,
+                     store, purchase_date, rid, _now()),
+                )
+                ids.append(c.lastrowid)
+    finally:
+        conn.close()
+    return rid, ids
+
+
+def get_receipt(receipt_id: int) -> sqlite3.Row | None:
+    """Gibt einen Bon anhand seiner ID zurück oder None."""
+    conn = get_conn()
+    row = conn.execute("SELECT * FROM receipts WHERE id = ?", (receipt_id,)).fetchone()
+    conn.close()
+    return row
+
+
+def list_receipts(filters: dict | None = None) -> list[sqlite3.Row]:
+    """
+    Gibt Bons zurück (neueste Kaufdaten zuerst).
+
+    :param filters: optional task_id, site_id, project_id, store (Teilstring, ohne Groß-/Kleinschreibung).
+    """
+    conn = get_conn()
+    where, params = [], []
+    f = filters or {}
+    if f.get("task_id") is not None:
+        where.append("r.task_id = ?"); params.append(f["task_id"])
+    if f.get("site_id") is not None:
+        where.append("t.site_id = ?"); params.append(f["site_id"])
+    if f.get("project_id") is not None:
+        where.append("t.site_id IN (SELECT id FROM sites WHERE project_id = ?)")
+        params.append(f["project_id"])
+    if f.get("store"):
+        where.append("LOWER(r.store) LIKE ?"); params.append(f"%{str(f['store']).lower()}%")
+    sql = ("SELECT r.*, t.site_id AS site_id FROM receipts r JOIN tasks t ON t.id = r.task_id")
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    sql += " ORDER BY r.purchase_date DESC, r.id DESC"
+    rows = conn.execute(sql, params).fetchall()
+    conn.close()
+    return rows
+
+
+def receipt_materials(receipt_id: int) -> list[sqlite3.Row]:
+    """Positionen eines Bons in Erfassungsreihenfolge."""
+    conn = get_conn()
+    rows = conn.execute("SELECT * FROM materials WHERE receipt_id = ? ORDER BY id",
+                        (receipt_id,)).fetchall()
+    conn.close()
+    return rows
+
+
+def delete_receipt(receipt_id: int) -> bool:
+    """Löscht einen Bon (kaskadiert zu Positionen und Bon-Dokumenten)."""
+    conn = get_conn()
+    with conn:
+        cur = conn.execute("DELETE FROM receipts WHERE id = ?", (receipt_id,))
+    conn.close()
+    return cur.rowcount > 0
+
+
+def receipt_document_paths(receipt_id: int) -> list[str]:
+    """Dateipfade der Bon-Dokumente — VOR delete_receipt aufrufen."""
+    conn = get_conn()
+    rows = conn.execute("SELECT stored_path FROM documents WHERE receipt_id = ?",
+                        (receipt_id,)).fetchall()
+    conn.close()
+    return [r["stored_path"] for r in rows if r["stored_path"]]
+
+
+# ---------------------------------------------------------------------------
 # CRUD: documents
 # ---------------------------------------------------------------------------
 
@@ -1113,6 +1263,7 @@ def create_document(
     doc_type: str | None = None,
     paperless_id: int | None = None,
     paperless_url: str | None = None,
+    receipt_id: int | None = None,
 ) -> int:
     """
     Legt einen Dokument-/Foto-Eintrag an.
@@ -1135,10 +1286,10 @@ def create_document(
         cur = conn.execute(
             "INSERT INTO documents "
             "(task_id, material_id, site_id, filename, stored_path, mime, "
-            " doc_type, paperless_id, paperless_url, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " doc_type, paperless_id, paperless_url, receipt_id, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (task_id, material_id, site_id, filename, stored_path, mime,
-             doc_type, paperless_id, paperless_url, _now()),
+             doc_type, paperless_id, paperless_url, receipt_id, _now()),
         )
     conn.close()
     return cur.lastrowid
@@ -1154,7 +1305,7 @@ def list_documents(filters: dict | None = None) -> list[sqlite3.Row]:
     where_parts = []
     params = []
     if filters:
-        for key in ("task_id", "material_id", "site_id", "doc_type"):
+        for key in ("task_id", "material_id", "site_id", "doc_type", "receipt_id"):
             if key in filters and filters[key] is not None:
                 where_parts.append(f"{key} = ?")
                 params.append(filters[key])

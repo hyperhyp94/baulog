@@ -900,9 +900,12 @@ def material_anlegen(
     mit_rechnung: bool = True,
     bezahlt: bool = False,
     bereits_gezahlt: float = None,
+    markt: str = None,
+    kaufdatum: str = None,
 ) -> dict:
     """
     Legt eine Materialposition / Ausgabe zu einer Aufgabe an (Einkauf, Miete, Entsorgung …).
+    Für einen KASSENBON mit mehreren Positionen stattdessen bon_erfassen verwenden.
     Kosten = Menge × Einzelpreis. Bei einem Gesamtbetrag: menge=1, einzelpreis=Betrag.
 
     Anfahrten NICHT hier erfassen, sondern als anfahrt bei zeiteintrag_anlegen.
@@ -916,6 +919,8 @@ def material_anlegen(
         einheit      — Mengeneinheit: „Stk" (Standard), „m²", „kg", „l", „Sack", „Pauschal" …
         mit_rechnung — True = mit Rechnung (Standard), False = ohne Rechnung (z. B. Barkauf).
         bezahlt      — True = schon bezahlt, False = noch offen (Standard).
+        markt        — Optional: Händler/Markt (z. B. „Hornbach").
+        kaufdatum    — Optional: Kaufdatum (TT.MM.JJJJ oder YYYY-MM-DD).
 
     Rückgabe: {"status": "ok", "id": <material_id>}
     """
@@ -923,6 +928,9 @@ def material_anlegen(
     if err:
         return err
     paid, err = _ja_nein(bezahlt, "bezahlt")
+    if err:
+        return err
+    kdatum, err = _datum(kaufdatum)
     if err:
         return err
     payload: dict = {
@@ -935,6 +943,10 @@ def material_anlegen(
     }
     if bereits_gezahlt:
         payload["paid_amount"] = bereits_gezahlt
+    if markt:
+        payload["store"] = markt
+    if kdatum:
+        payload["purchase_date"] = kdatum
     return _post(f"/api/tasks/{aufgabe_id}/materials", payload)
 
 
@@ -1100,8 +1112,8 @@ def projekt_uebersicht(projekt_id: int) -> dict:
                    noch nicht voll bezahlten Posten; offen = Restbetrag,
       material[]  (material_id, aufgabe_id, erfasst_am, bezeichnung, menge, einheit,
                    einzelpreis, betrag, mit_rechnung, bezahlt, teilweise_gezahlt,
-                   gezahlt, offen),
-      dokumente[] (dokument_id, dateiname, typ, aufgabe_id, material_id, erfasst_am),
+                   gezahlt, offen, markt, kaufdatum, bon_id),
+      dokumente[] (dokument_id, dateiname, typ, aufgabe_id, material_id, bon_id, erfasst_am),
       summen      (gesamt, arbeit, anfahrt, material, stunden, mit_rechnung,
                    ohne_rechnung, bezahlt, offen),
       je_person[] (person, stunden, anfahrt, kosten, offen).
@@ -1148,6 +1160,8 @@ def projekt_uebersicht(projekt_id: int) -> dict:
                     "betrag": _r2(m["qty"] * m["unit_price"]),
                     "mit_rechnung": bool(m["billed"]), "bezahlt": bool(m["paid"]),
                     "teilweise_gezahlt": _r2(m.get("paid_amount") or 0) if not m["paid"] else 0,
+                    "markt": m.get("store"), "kaufdatum": m.get("purchase_date"),
+                    "bon_id": m.get("receipt_id"),
                 })
             for d in det.get("documents", []):
                 dokumente[d["id"]] = d
@@ -1192,6 +1206,7 @@ def projekt_uebersicht(projekt_id: int) -> dict:
         "material": material,
         "dokumente": [{"dokument_id": d["id"], "dateiname": d["filename"], "typ": d["doc_type"],
                        "aufgabe_id": d["task_id"], "material_id": d["material_id"],
+                       "bon_id": d.get("receipt_id"),
                        "erfasst_am": (d["created_at"] or "")[:10],
                        "in_paperless": bool(d["paperless_id"])}
                       for d in sorted(dokumente.values(), key=lambda d: d["id"], reverse=True)],
@@ -1409,10 +1424,18 @@ def dokument_loeschen(dokument_id: int) -> dict:
     return _delete(f"/api/documents/{dokument_id}")
 
 
-def dokument_zu_paperless(dokument_id: int) -> dict:
+def dokument_zu_paperless(dokument_id: int, anlegen: bool = False) -> dict:
     """
     Sendet ein bereits hochgeladenes Dokument an Paperless-ngx und speichert
     die zurückgegebene Paperless-Dokument-ID und den direkten Link.
+
+    Metadaten kommen aus dem Baulog: Titel („Markt, Datum, Summe"), Erstellungsdatum =
+    Kaufdatum, Korrespondent = Markt, Dokumenttyp (Kassenbon/Rechnung) und Tags
+    (Baulog, Projekt, Aufgabe, Gewerk, ggf. „ohne Rechnung").
+
+    Fehlen Korrespondent, Dokumenttyp oder Tags in Paperless, wird NICHTS gesendet; die
+    Antwort listet unter „fehlt", was fehlt. Erst nach Svens Okay mit anlegen=True erneut
+    aufrufen — dann werden die fehlenden Einträge angelegt und das Dokument gesendet.
 
     Voraussetzung: Paperless muss in config.local.json oder über die Umgebungsvariablen
     PAPERLESS_URL und PAPERLESS_TOKEN konfiguriert sein. Andernfalls wird ein Fehler
@@ -1420,10 +1443,140 @@ def dokument_zu_paperless(dokument_id: int) -> dict:
 
     Parameter:
         dokument_id — ID des Dokuments in baulog (int).
+        anlegen     — True = fehlende Paperless-Einträge anlegen (nur nach Okay von Sven).
 
-    Rückgabe: {"status": "ok", "paperless_id": ..., "paperless_url": "..."}
+    Rückgabe: {"status": "ok", "paperless_id": ..., "paperless_url": "...", "titel": ...,
+               "tags": [...], "neu_in_paperless": [...]}
     """
-    return _post(f"/api/documents/{dokument_id}/paperless", {})
+    return _post(f"/api/documents/{dokument_id}/paperless", {"anlegen": bool(anlegen)})
+
+
+# ---------------------------------------------------------------------------
+# 8b. Kassenbons (festes Schema: Markt, Datum, Positionen, Gesamtsumme)
+# ---------------------------------------------------------------------------
+
+def bon_erfassen(
+    aufgabe_id: int,
+    markt: str,
+    kaufdatum: str,
+    gesamtsumme: float,
+    positionen: list,
+    datei_pfad: str = "",
+    mit_rechnung: bool = True,
+    bezahlt: bool = False,
+) -> dict:
+    """
+    Erfasst einen Kassenbon nach FESTEM SCHEMA in einem Aufruf: Markt, Kaufdatum,
+    alle Positionen und die Gesamtsumme. Jede Position wird ein Materialposten (mit Markt
+    und Kaufdatum). Alles oder nichts: passt die Summe der Positionen nicht zur
+    Gesamtsumme laut Bon, wird NICHTS gebucht (Bon abgeschnitten? Rabatt/Pfand fehlt?).
+
+    Werte nur aus dem Bon übernehmen (vision_analyze), nichts schätzen. Pfand, Rabatt
+    und Gutscheine als eigene Positionen (Rabatt mit negativem Preis ist nicht erlaubt —
+    dann Einzelpreise nach Rabatt eintragen oder Sven fragen).
+
+    Parameter:
+        aufgabe_id  — Aufgabe, zu der der Einkauf gehört (aus projekt_uebersicht).
+        markt       — Händler/Markt laut Bon, z. B. „Hornbach", „toom", „Bauhaus".
+        kaufdatum   — Kaufdatum laut Bon (TT.MM.JJJJ oder YYYY-MM-DD). Pflicht.
+        gesamtsumme — Gesamtbetrag laut Bon in Euro.
+        positionen  — Liste von {"bezeichnung", "menge", "einzelpreis", "einheit"?}.
+                      Bei Mengen wie „2 x 3,50" menge=2, einzelpreis=3.5.
+        datei_pfad  — Optional: Foto/PDF des Bons; wird am Bon abgelegt.
+        mit_rechnung / bezahlt — wie bei material_anlegen (Standard: mit Rechnung, offen).
+
+    Rückgabe: {"status": "ok", "id": <bon_id>, "material_ids": [...], "summe": ...,
+               "dokument_id": ...}. Danach ggf. dokument_zu_paperless(dokument_id).
+    """
+    kdatum, err = _datum(kaufdatum)
+    if err:
+        return err
+    if not kdatum:
+        return _fehler("kaufdatum fehlt (Datum laut Bon).")
+    if isinstance(positionen, str):
+        try:
+            positionen = json.loads(positionen)
+        except ValueError:
+            return _fehler("positionen muss eine Liste sein.")
+    if not isinstance(positionen, list) or not positionen:
+        return _fehler("positionen: mindestens eine Position nötig.")
+    liste = []
+    for i, p in enumerate(positionen, start=1):
+        if not isinstance(p, dict):
+            return _fehler(f"Position {i}: muss ein Objekt sein.")
+        name = p.get("bezeichnung") or p.get("name")
+        menge = p.get("menge", p.get("qty"))
+        preis = p.get("einzelpreis", p.get("unit_price"))
+        if not name or menge is None or preis is None:
+            return _fehler(f"Position {i}: bezeichnung, menge und einzelpreis sind Pflicht.")
+        liste.append({"name": name, "qty": menge, "unit_price": preis,
+                      "unit": p.get("einheit") or p.get("unit")})
+    billed, err = _ja_nein(mit_rechnung, "mit_rechnung")
+    if err:
+        return err
+    paid, err = _ja_nein(bezahlt, "bezahlt")
+    if err:
+        return err
+
+    pfad = ""
+    if datei_pfad:
+        pfad = os.path.expanduser(str(datei_pfad).strip())
+        if not os.path.isfile(pfad):
+            return _fehler(f"Datei nicht gefunden: {datei_pfad}")
+        endung = os.path.splitext(pfad)[1].lower()
+        if endung not in _ERLAUBTE_ENDUNGEN:
+            return _fehler(f"Dateityp {endung or '(ohne Endung)'} nicht erlaubt. Erlaubt: "
+                           f"{', '.join(sorted(_ERLAUBTE_ENDUNGEN))}. HEIC bitte als JPG schicken lassen.")
+        if os.path.getsize(pfad) > _MAX_UPLOAD:
+            return _fehler("Datei ist größer als 20 MB.")
+
+    res = _post(f"/api/tasks/{aufgabe_id}/receipts", {
+        "store": markt, "purchase_date": kdatum, "total": gesamtsumme,
+        "positions": liste, "billed": billed, "paid": paid})
+    if not _ok_antwort(res) or not pfad:
+        return res
+    try:
+        boundary, body = _multipart({}, pfad)
+        up = _send("POST", f"/api/receipts/{res['id']}/document", body,
+                   {"Content-Type": f"multipart/form-data; boundary={boundary}"})
+    except Exception as exc:  # noqa: BLE001
+        return {**res, "warnung": f"Bon gebucht, aber Datei nicht angehängt: {exc}"}
+    if not _ok_antwort(up):
+        return {**res, "warnung": f"Bon gebucht, aber Datei nicht angehängt: {up.get('error')}"}
+    return {**res, "dokument_id": up.get("id")}
+
+
+def bons_liste(projekt_id: int = None, aufgabe_id: int = None, markt: str = None) -> dict:
+    """
+    Listet Kassenbons mit Positionen, Summe und angehängter Datei (neueste Kaufdaten zuerst).
+
+    Parameter:
+        projekt_id  — Nur Bons dieses Projekts.
+        aufgabe_id  — Nur Bons dieser Aufgabe.
+        markt       — Teilstring des Marktes, z. B. „horn" findet „Hornbach".
+
+    Rückgabe: {"status": "ok", "receipts": [{id, store, purchase_date, total,
+               summe_positionen, positionen[], dokumente[]}]}
+    """
+    params = []
+    if projekt_id is not None:
+        params.append(f"project_id={projekt_id}")
+    if aufgabe_id is not None:
+        params.append(f"task_id={aufgabe_id}")
+    if markt:
+        params.append(f"store={urllib.parse.quote(markt)}")
+    return _get("/api/receipts" + (("?" + "&".join(params)) if params else ""))
+
+
+def bon_loeschen(bon_id: int) -> dict:
+    """
+    Löscht einen Bon samt allen Positionen und der angehängten Datei. NUR auf
+    ausdrückliche Anweisung von Sven.
+
+    Parameter:
+        bon_id — ID des Bons (aus bons_liste).
+    """
+    return _delete(f"/api/receipts/{bon_id}")
 
 
 # ---------------------------------------------------------------------------
@@ -1489,6 +1642,9 @@ register_tool("dokument_hochladen",   dokument_hochladen)
 register_tool("dokumente_liste",      dokumente_liste)
 register_tool("dokument_loeschen",    dokument_loeschen)
 register_tool("dokument_zu_paperless", dokument_zu_paperless)
+register_tool("bon_erfassen",          bon_erfassen)
+register_tool("bons_liste",            bons_liste)
+register_tool("bon_loeschen",          bon_loeschen)
 
 # ---------------------------------------------------------------------------
 # Einstiegspunkt

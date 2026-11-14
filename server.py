@@ -1074,6 +1074,12 @@ def api_materials_create(task_id: int):
     unit, err = _str_field(data, "unit")
     if err:
         return err
+    store, err = _str_field(data, "store", max_length=120)
+    if err:
+        return err
+    purchase_date, err = _date_field(data, "purchase_date")
+    if err:
+        return err
     tz = {"paid": paid}
     if "paid_amount" in data:
         tz["paid_amount"] = data["paid_amount"]
@@ -1088,6 +1094,8 @@ def api_materials_create(task_id: int):
         unit=unit,
         billed=billed,
         paid=tz["paid"],
+        store=store,
+        purchase_date=purchase_date,
     )
     if tz.get("paid_amount"):
         db.update_material(mid, {"paid_amount": tz["paid_amount"]})
@@ -1105,7 +1113,7 @@ def api_material_update(mid: int):
         return _err("Materialposition nicht gefunden.", 404)
     data = request.get_json(silent=True) or {}
     fields = {k: data[k] for k in ("name", "qty", "unit", "unit_price", "billed", "paid",
-                                              "paid_amount") if k in data}
+                                              "paid_amount", "store", "purchase_date") if k in data}
     if not fields:
         return _err("Keine aktualisierbaren Felder angegeben.")
     if "billed" in fields:
@@ -1122,6 +1130,14 @@ def api_material_update(mid: int):
             return err
     if "unit" in fields:
         fields["unit"], err = _str_field(fields, "unit")
+        if err:
+            return err
+    if "store" in fields:
+        fields["store"], err = _str_field(fields, "store", max_length=120)
+        if err:
+            return err
+    if "purchase_date" in fields:
+        fields["purchase_date"], err = _date_field(fields, "purchase_date")
         if err:
             return err
     if "qty" in fields:
@@ -1301,8 +1317,225 @@ def api_document_delete(doc_id: int):
 
 
 # ---------------------------------------------------------------------------
+# Kassenbons (/api/receipts) — fest definiertes Schema: Markt, Datum, Positionen, Summe
+# ---------------------------------------------------------------------------
+
+def _receipt_dict(r) -> dict:
+    d = dict(r)
+    mats = _rows(db.receipt_materials(d["id"]))
+    for m in mats:
+        m["kosten"] = round(m["qty"] * m["unit_price"], 2)
+    d["positionen"] = mats
+    d["summe_positionen"] = round(sum(m["kosten"] for m in mats), 2)
+    d["dokumente"] = _rows(db.list_documents({"receipt_id": d["id"]}))
+    return d
+
+
+@app.route("/api/tasks/<int:task_id>/receipts", methods=["POST"])
+def api_receipt_create(task_id: int):
+    """
+    Legt einen Kassenbon mit allen Positionen an (alles oder nichts).
+
+    Body (JSON): { "store", "purchase_date" (YYYY-MM-DD), "total",
+                   "positions": [{ "name", "qty", "unit_price", "unit"? }, …],
+                   "billed"?, "paid"? }
+    Pflicht: store, purchase_date, total, mind. 1 Position.
+    Prüfung: Summe der Positionen muss der Gesamtsumme laut Bon entsprechen (±0,02 €).
+    Bei Abweichung wird NICHTS gebucht (HTTP 422) — dann Bon prüfen/abgeschnitten?
+    """
+    if not db.get_task(task_id):
+        return _err("Aufgabe nicht gefunden.", 404)
+    data = request.get_json(silent=True) or {}
+    store, err = _str_field(data, "store", required=True, max_length=120)
+    if err:
+        return err
+    pdate, err = _date_field(data, "purchase_date")
+    if err:
+        return err
+    if not pdate:
+        return _err("Feld 'purchase_date' ist Pflichtfeld (Kaufdatum laut Bon, YYYY-MM-DD).")
+    total, err = _num_field(data, "total", required=True, minimum=0)
+    if err:
+        return err
+    billed, err = _flag_field(data, "billed")
+    if err:
+        return err
+    paid, err = _flag_field(data, "paid", default=0)
+    if err:
+        return err
+    raw = data.get("positions")
+    if not isinstance(raw, list) or not raw:
+        return _err("Feld 'positions' muss eine nicht leere Liste sein.")
+    if len(raw) > 200:
+        return _err("Zu viele Positionen (max. 200).")
+    positions = []
+    for i, p in enumerate(raw, start=1):
+        if not isinstance(p, dict):
+            return _err(f"Position {i}: muss ein Objekt sein.")
+        name, err = _str_field(p, "name", required=True, max_length=200)
+        if err:
+            return _err(f"Position {i}: Bezeichnung fehlt.")
+        qty, err = _num_field(p, "qty", required=True, minimum=0)
+        if err:
+            return _err(f"Position {i}: Menge ungültig.")
+        price, err = _num_field(p, "unit_price", required=True, minimum=0)
+        if err:
+            return _err(f"Position {i}: Einzelpreis ungültig.")
+        unit, err = _str_field(p, "unit", max_length=30)
+        if err:
+            return _err(f"Position {i}: Einheit ungültig.")
+        positions.append({"name": name, "qty": qty, "unit_price": price, "unit": unit})
+    summe = round(sum(round(p["qty"] * p["unit_price"], 2) for p in positions), 2)
+    if abs(summe - round(total, 2)) > 0.02:
+        return _err(
+            f"Summe der Positionen ({summe:.2f} €) passt nicht zur Gesamtsumme laut Bon "
+            f"({total:.2f} €). Nichts gebucht — Bon vollständig? Rabatte/Pfand als eigene Position?",
+            422)
+    rid, ids = db.create_receipt_with_materials(
+        task_id, store, pdate, round(total, 2), positions, billed=billed, paid=paid)
+    return _ok(id=rid, material_ids=ids, summe=summe), 201
+
+
+@app.route("/api/receipts", methods=["GET"])
+def api_receipts_list():
+    """Bons auflisten. Query: task_id, site_id, project_id, store (Teilstring)."""
+    filters: dict = {}
+    for key in ("task_id", "site_id", "project_id"):
+        val = request.args.get(key)
+        if val:
+            iv, err = _int_arg(key, val)
+            if err:
+                return err
+            filters[key] = iv
+    if request.args.get("store"):
+        filters["store"] = request.args["store"]
+    return _ok(receipts=[_receipt_dict(r) for r in db.list_receipts(filters or None)])
+
+
+@app.route("/api/receipts/<int:rid>", methods=["GET"])
+def api_receipt_get(rid: int):
+    r = db.get_receipt(rid)
+    if not r:
+        return _err("Bon nicht gefunden.", 404)
+    return _ok(receipt=_receipt_dict(r))
+
+
+@app.route("/api/receipts/<int:rid>", methods=["DELETE"])
+def api_receipt_delete(rid: int):
+    """Löscht Bon samt Positionen und Bon-Dokumenten (Dateien werden mit entfernt)."""
+    if not db.get_receipt(rid):
+        return _err("Bon nicht gefunden.", 404)
+    paths = db.receipt_document_paths(rid)
+    db.delete_receipt(rid)
+    _remove_files(paths)
+    return _ok()
+
+
+@app.route("/api/receipts/<int:rid>/document", methods=["POST"])
+def api_receipt_document(rid: int):
+    """
+    Hängt die Bon-Datei (Foto/PDF) an den Bon. multipart/form-data: file.
+    Die Datei hängt am Bon, nicht an jeder Einzelposition.
+    """
+    r = db.get_receipt(rid)
+    if not r:
+        return _err("Bon nicht gefunden.", 404)
+    if "file" not in request.files or not request.files["file"].filename:
+        return _err("Feld 'file' fehlt.")
+    f = request.files["file"]
+    if not _allowed_file(f.filename):
+        return _err(f"Dateityp nicht erlaubt. Erlaubt: {', '.join(sorted(ALLOWED_EXTENSIONS))}")
+    task = db.get_task(r["task_id"])
+    filename = secure_filename(f.filename)
+    mime = mimetypes.types_map.get(Path(filename).suffix.lower(), "application/octet-stream")
+    doc_id = db.create_document(filename=filename, stored_path="", task_id=r["task_id"],
+                                site_id=task["site_id"] if task else None, mime=mime,
+                                doc_type="beleg", receipt_id=rid)
+    stored_path = os.path.join(UPLOADS_DIR, f"{doc_id}_{filename}")
+    try:
+        f.save(stored_path)
+    except OSError as exc:
+        db.delete_document(doc_id)
+        return _err(f"Datei konnte nicht gespeichert werden: {exc}", 500)
+    db.update_document(doc_id, {"stored_path": stored_path})
+    return _ok(id=doc_id, filename=filename), 201
+
+
+# ---------------------------------------------------------------------------
 # Paperless-Integration (/api/documents/<doc_id>/paperless)
 # ---------------------------------------------------------------------------
+
+
+def _pl_lookup(base: str, headers: dict, endpoint: str, name: str, create_body: dict | None = None):
+    """
+    Sucht in Paperless einen Eintrag (tags / correspondents / document_types) über den Namen
+    (exakt, ohne Groß-/Kleinschreibung; bei Korrespondenten zusätzlich Teilstring-Treffer wie
+    'toom' → 'toom Baumarkt GmbH'). Fehlt er und create_body ist gesetzt, wird er angelegt.
+    Gibt (id | None, neu_angelegt: bool) zurück.
+    """
+    wanted = name.strip().lower()
+    page = f"{base}/api/{endpoint}/?page_size=500&name__icontains={requests.utils.quote(name.strip())}"
+    resp = requests.get(page, headers=headers, timeout=15)
+    resp.raise_for_status()
+    results = resp.json().get("results", [])
+    for it in results:
+        if it["name"].strip().lower() == wanted:
+            return it["id"], False
+    if endpoint == "correspondents" and len(wanted) >= 4:
+        for it in results:
+            if wanted in it["name"].lower():
+                return it["id"], False
+    if create_body is None:
+        return None, False
+    made = requests.post(f"{base}/api/{endpoint}/", headers=headers,
+                         json={"name": name.strip(), **create_body}, timeout=15)
+    made.raise_for_status()
+    return made.json()["id"], True
+
+
+def _paperless_meta(doc) -> dict:
+    """
+    Metadaten für Paperless aus dem Baulog ableiten: Titel, Datum, Korrespondent (Markt),
+    Dokumenttyp und Tag-Namen (Projekt, Aufgabe, Gewerk, Rechnung ja/nein).
+    """
+    task_id = doc["task_id"]
+    receipt = db.get_receipt(doc["receipt_id"]) if doc["receipt_id"] else None
+    material = db.get_material(doc["material_id"]) if doc["material_id"] else None
+    if task_id is None and receipt:
+        task_id = receipt["task_id"]
+    if task_id is None and material:
+        task_id = material["task_id"]
+    task = db.get_task(task_id) if task_id else None
+    site = db.get_site(task["site_id"]) if task else None
+    project = db.get_project(site["project_id"]) if site else None
+    trade = db.get_trade(task["trade_id"]) if task and task["trade_id"] else None
+
+    meta: dict = {"title": doc["filename"], "created": None, "store": None,
+                  "doc_type_name": None, "tags": ["Baulog"]}
+    if receipt:
+        euro = f"{receipt['total']:.2f}".replace(".", ",")
+        y, m, d = receipt["purchase_date"].split("-")
+        meta["title"] = f"{receipt['store']}, {d}.{m}.{y}, {euro} €"
+        meta["created"] = receipt["purchase_date"]
+        meta["store"] = receipt["store"]
+        meta["doc_type_name"] = "Kassenbon"
+        positions = db.receipt_materials(receipt["id"])
+        if positions and not positions[0]["billed"]:
+            meta["tags"].append("ohne Rechnung")
+    elif doc["doc_type"] == "rechnung":
+        meta["doc_type_name"] = "Rechnung"
+    elif doc["doc_type"] == "beleg":
+        meta["doc_type_name"] = "Kassenbon"
+    if project:
+        meta["tags"].append(project["name"])
+    if task:
+        meta["tags"].append(task["title"])
+    if trade:
+        meta["tags"].append(trade["name"])
+    # Duplikate entfernen, Reihenfolge behalten
+    meta["tags"] = list(dict.fromkeys(t for t in meta["tags"] if t))
+    return meta
+
 
 @app.route("/api/documents/<int:doc_id>/paperless", methods=["POST"])
 def api_document_paperless(doc_id: int):
@@ -1338,6 +1571,43 @@ def api_document_paperless(doc_id: int):
     filename = doc["filename"]
     headers = {"Authorization": f"Token {paperless_token}"}
 
+    # Metadaten aus dem Baulog ableiten und in Paperless auflösen (Tags, Markt, Dokumenttyp).
+    # Fehlende Einträge werden NUR angelegt, wenn der Aufruf {"anlegen": true} enthält —
+    # sonst bricht die Übergabe ab und meldet, was fehlt (Svens Regel: nichts Neues ohne Okay).
+    meta = _paperless_meta(doc)
+    body = request.get_json(silent=True) or {}
+    anlegen = body.get("anlegen") is True
+    form: list[tuple[str, str]] = [("title", meta["title"])]
+    angelegt: list[str] = []
+    fehlt: list[str] = []
+    try:
+        if meta["created"]:
+            form.append(("created", meta["created"]))
+        wanted = []
+        if meta["store"]:
+            wanted.append(("correspondents", meta["store"], "correspondent", "Korrespondent", {}))
+        if meta["doc_type_name"]:
+            wanted.append(("document_types", meta["doc_type_name"], "document_type", "Dokumenttyp",
+                           {"matching_algorithm": 0}))
+        for tag in meta["tags"]:
+            wanted.append(("tags", tag, "tags", "Tag", {"matching_algorithm": 0}))
+        for endpoint, name, field, label, create_body in wanted:
+            found, _ = _pl_lookup(paperless_url, headers, endpoint, name, None)
+            if found is None:
+                if not anlegen:
+                    fehlt.append(f"{label} „{name}“")
+                    continue
+                found, _ = _pl_lookup(paperless_url, headers, endpoint, name, create_body)
+                angelegt.append(f"{label} „{name}“")
+            form.append((field, str(found)))
+    except requests.RequestException as exc:
+        return _err(f"Paperless-Metadaten konnten nicht aufgelöst werden: {exc}", 502)
+    if fehlt:
+        return jsonify({
+            "error": "In Paperless fehlen: " + "; ".join(fehlt) + ". Nichts gesendet. "
+                     "Mit anlegen=true werden sie angelegt (vorher Sven fragen).",
+            "fehlt": fehlt, "titel": meta["title"], "tags": meta["tags"]}), 409
+
     # Dokument an Paperless hochladen
     try:
         with open(stored_path, "rb") as fh:
@@ -1345,7 +1615,7 @@ def api_document_paperless(doc_id: int):
                 f"{paperless_url}/api/documents/post_document/",
                 headers=headers,
                 files={"document": (filename, fh, mime)},
-                data={"title": filename},
+                data=form,
                 timeout=30,
             )
         if resp.status_code not in (200, 201, 202):
@@ -1404,7 +1674,8 @@ def api_document_paperless(doc_id: int):
 
     pl_url = f"{paperless_url}/documents/{pl_doc_id}"
     db.update_document(doc_id, {"paperless_id": int(pl_doc_id), "paperless_url": pl_url})
-    return _ok(paperless_id=pl_doc_id, paperless_url=pl_url)
+    return _ok(paperless_id=pl_doc_id, paperless_url=pl_url, titel=meta["title"],
+               tags=meta["tags"], neu_in_paperless=angelegt)
 
 
 # ---------------------------------------------------------------------------
