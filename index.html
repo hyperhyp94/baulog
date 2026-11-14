@@ -731,7 +731,6 @@ function zeichneProjekt() {
     <div class="aktionsleiste">
       <button onclick="formZeit()"><span class="plus">+</span> Stunden</button>
       <button onclick="formMaterial()"><span class="plus">+</span> Material</button>
-      ${App.receipts ? `<button onclick="bonStart()">📷 Kassenbon</button>` : ''}
       <button onclick="formBeleg()"><span class="plus">+</span> Foto/Beleg</button>
       <button class="hell nur-desktop" onclick="formAufgabe()"><span class="plus">+</span> Aufgabe</button>
     </div>
@@ -1320,6 +1319,10 @@ function formMaterial(id, vorgabe) {
 
   openModal(`${modalKopf(m ? 'Material bearbeiten' : 'Material / Kosten erfassen')}
     <div class="modal-body">
+      ${!m && App.receipts ? `<div class="unterfeld" style="margin:0 0 6px">
+        <button type="button" style="width:100%" onclick="bonAusMaterial()">📷 Kassenbon / Rechnung fotografieren</button>
+        <p class="hinweis" style="margin:6px 0 0">Die Positionen vom Bon werden ausgelesen und nach deiner Prüfung
+          automatisch als Material angelegt – der Bon hängt dann daran. Oder unten von Hand eintragen.</p></div>` : ''}
       <label for="f-name">Was?</label>
       <input id="f-name" value="${esc(m ? m.name : '')}" placeholder="z. B. Rigipsplatten, Spachtelmasse, Anfahrt" autofocus>
       <div class="grid3">
@@ -1465,7 +1468,13 @@ function speichereBeleg() {
 // ============================================================
 // KASSENBON PER KAMERA (Fotos → Claude-Auswertung → Prüfen → Bon buchen)
 // ============================================================
-const Bon = { fotos: [], erg: null };
+const Bon = { fotos: [], erg: null, task: null };
+
+// Aus dem Material-Formular: gewählte Aufgabe übernehmen
+function bonAusMaterial() {
+  const sel = $('#f-task');
+  bonStart(sel && sel.value !== '__neu' ? sel.value : null);
+}
 
 // Verkleinert auf lange Kante 2000 px (JPEG 85 %); EXIF-Drehung wird berücksichtigt.
 async function bonVerkleinern(file) {
@@ -1479,9 +1488,9 @@ async function bonVerkleinern(file) {
   return (await new Promise(r => c.toBlob(r, 'image/jpeg', 0.85))) || file;
 }
 
-function bonStart() {
+function bonStart(task) {
   Bon.fotos.forEach(f => URL.revokeObjectURL(f.url));
-  Bon.fotos = []; Bon.erg = null;
+  Bon.fotos = []; Bon.erg = null; Bon.task = task || null;
   bonFotos();
 }
 
@@ -1506,7 +1515,7 @@ function bonFotos() {
         <button type="button" class="hell" onclick="$('#bon-galerie').click()">Aus Galerie</button>
       </div>
     </div>
-    <div class="modal-fuss"><button class="hell" onclick="closeModal()">Abbrechen</button>
+    <div class="modal-fuss"><button class="hell" onclick="formMaterial(null, Bon.task ? { task: Bon.task } : null)">← Material</button>
       <span class="spacer"></span>
       <button id="bon-los" onclick="bonAuswerten()" ${n ? '' : 'disabled'}>Auswerten (${n})</button></div>`);
   if (n) modalGeaendert = true;
@@ -1541,7 +1550,7 @@ async function bonAuswerten() {
 }
 
 function bonPruefen() {
-  const e = Bon.erg, merk = gemerkt();
+  const e = Bon.erg, merk = { ...gemerkt(), ...(Bon.task ? { task: Bon.task } : {}) };
   const rabatt = e.rabatte.reduce((s, r) => s + r.betrag, 0);
   openModal(`${modalKopf('Kassenbon prüfen')}
     <div class="modal-body">
@@ -1577,7 +1586,7 @@ function bonPruefen() {
       <label>Schon bezahlt?</label>${seg('bonpaid', 1, [[0, 'Noch offen'], [1, 'Bezahlt']])}
     </div>
     <div class="modal-fuss"><button class="hell" onclick="bonFotos()">← Fotos</button>
-      <span class="spacer"></span><button onclick="bonBuchen()">Bon buchen</button></div>`);
+      <span class="spacer"></span><button onclick="bonBuchen()">Als Material anlegen</button></div>`);
   modalGeaendert = true;
   bonSumme();
 }
