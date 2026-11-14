@@ -93,10 +93,16 @@ ANBIETER = {
         "name": "OpenCode Go",
         "env": "OPENCODE_GO_API_KEY",
         "url": "https://opencode.ai/inference/go/openai/v1/chat/completions",
-        "standard": "deepseek-v4.1-flash",
+        "standard": "gemini-4-argon",
         # nur Modelle mit Bild-Eingabe (deepseek-v4-pro kann keine Bilder lesen)
-        "modelle": ["deepseek-v4.1-flash", "qwen3.8-flash", "gpt-6-luna", "mimo-v2.6-flash",
-                    "claude-haiku-5-5", "gemini-4-argon", "qwen3.8-max"],
+        "modelle": [
+            # stark (empfohlen für Kassenbons)
+            "gemini-4-argon", "qwen3.8-max", "kimi-k3.1-pro", "grok-4.7", "kimi-k3",
+            "step-5-preview", "mimo-v2.6-pro", "hy4", "qwen3.7-plus", "kimi-k2.7-code",
+            # günstig
+            "deepseek-v4.1-flash", "qwen3.8-flash", "gpt-6-luna", "gpt-5.6-luna",
+            "claude-haiku-5-5", "mimo-v2.6-flash", "minimax-m3", "minimax-m3.1-flash",
+        ],
     },
 }
 
