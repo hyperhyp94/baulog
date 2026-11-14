@@ -513,6 +513,7 @@ async function route() {
     if (teile[0] === 'projekte' && /^\d+$/.test(teile[1])) return location.replace('#/p/' + teile[1]);
     if (teile[0] === 'personen') return await zeigePersonen();
     if (teile[0] === 'verlauf') return await zeigeVerlauf();
+    if (teile[0] === 'eingang' && teile[1]) return await zeigeEingang(teile[1]);
     return await zeigeProjekte();
   } catch (e) {
     $('#view').innerHTML = `<div class="leer"><p>${esc(e.message)}</p>
@@ -1564,13 +1565,14 @@ function bonStart(task) {
 
 function bonFotos() {
   const n = Bon.fotos.length;
-  openModal(`${modalKopf('Kassenbon fotografieren')}
+  openModal(`${modalKopf('Kassenbon / Rechnung')}
     <div class="modal-body">
       <p class="hinweis" style="margin-top:0">Langen Bon von oben nach unten in Abschnitten fotografieren –
         jedes Foto zeigt die letzte Zeile des vorigen noch mit. Max. 10 Fotos.</p>
       <div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:10px;">
         ${Bon.fotos.map((f, i) => `<div style="width:76px">
-          <img src="${f.url}" alt="Foto ${i + 1}" style="width:76px; height:100px; object-fit:cover; border:1px solid var(--line); display:block">
+          ${f.pdf ? `<div title="${esc(f.name)}" style="width:76px; height:100px; border:1px solid var(--line); display:flex; flex-direction:column; align-items:center; justify-content:center; background:#fff; font-size:12px; overflow:hidden; text-align:center"><b style="font-size:20px">PDF</b>${esc(f.name.slice(0, 18))}</div>`
+            : `<img src="${f.url}" alt="Foto ${i + 1}" style="width:76px; height:100px; object-fit:cover; border:1px solid var(--line); display:block">`}
           <div style="display:flex; gap:2px; margin-top:2px">
             <button type="button" class="hell klein" style="flex:1; padding:2px" onclick="bonVerschieben(${i})" ${i ? '' : 'disabled'} aria-label="nach vorn">◀</button>
             <button type="button" class="rot klein" style="flex:1; padding:2px" onclick="bonFotoWeg(${i})" aria-label="Foto löschen">✕</button>
@@ -1578,9 +1580,11 @@ function bonFotos() {
       </div>
       <input id="bon-kamera" type="file" accept="image/*" capture="environment" class="hidden" onchange="bonFotoNeu(this)">
       <input id="bon-galerie" type="file" accept="image/*" multiple class="hidden" onchange="bonFotoNeu(this)">
+      <input id="bon-pdf" type="file" accept="application/pdf,.pdf" class="hidden" onchange="bonFotoNeu(this)">
       <div style="display:flex; gap:8px; margin-top:12px; flex-wrap:wrap">
         <button type="button" onclick="$('#bon-kamera').click()" ${n >= 10 ? 'disabled' : ''}>📷 ${n ? 'Nächster Abschnitt' : 'Foto aufnehmen'}</button>
         <button type="button" class="hell" onclick="$('#bon-galerie').click()">Aus Galerie</button>
+        <button type="button" class="hell" onclick="$('#bon-pdf').click()">📄 PDF-Rechnung</button>
       </div>
     </div>
     <div class="modal-fuss"><button class="hell" onclick="formMaterial(null, Bon.task ? { task: Bon.task } : null)">← Material</button>
@@ -1592,6 +1596,11 @@ function bonFotos() {
 async function bonFotoNeu(input) {
   for (const file of [...(input.files || [])]) {
     if (Bon.fotos.length >= 10) { showError('Maximal 10 Fotos pro Bon.'); break; }
+    if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '')) {
+      if (file.size > 20 * 1024 * 1024) { showError('PDF ist größer als 20 MB.'); continue; }
+      Bon.fotos.push({ blob: file, url: URL.createObjectURL(file), pdf: true, name: file.name || 'rechnung.pdf' });
+      continue;
+    }
     const blob = await bonVerkleinern(file);
     Bon.fotos.push({ blob, url: URL.createObjectURL(blob) });
   }
@@ -1604,7 +1613,7 @@ async function bonAuswerten() {
   const knopf = $('#bon-los');
   knopf.disabled = true; knopf.textContent = 'Wird gelesen … (bis 1 Min.)';
   const fd = new FormData();
-  Bon.fotos.forEach((f, i) => fd.append('images', f.blob, `bon_${i + 1}.jpg`));
+  Bon.fotos.forEach((f, i) => fd.append('images', f.blob, f.pdf ? `rechnung_${i + 1}.pdf` : `bon_${i + 1}.jpg`));
   try {
     const res = await fetch('/api/receipts/analyze', { method: 'POST', body: fd });
     let json; try { json = await res.json(); } catch { json = {}; }
@@ -1739,7 +1748,7 @@ Trotzdem ${euro(ziel)} buchen?`);
     const fehler = [];
     for (const [i, f] of Bon.fotos.entries()) {
       const fd = new FormData();
-      fd.append('file', f.blob, `bon_${purchase_date}_${i + 1}.jpg`);
+      fd.append('file', f.blob, f.pdf ? f.name : `bon_${purchase_date}_${i + 1}.jpg`);
       try {
         const res = await fetch(`/api/receipts/${r.id}/document`, { method: 'POST', body: fd });
         if (!res.ok) fehler.push(`Foto ${i + 1}: Fehler ${res.status}`);
@@ -1749,6 +1758,7 @@ Trotzdem ${euro(ziel)} buchen?`);
     showToast(`Bon gebucht: ${pos.length} ${pos.length === 1 ? 'Position' : 'Positionen'}, ${euro(total)}`, 'success');
     fehler.forEach(m => showError('Bon gebucht, aber ' + m));
     Bon.fotos.forEach(f => URL.revokeObjectURL(f.url)); Bon.fotos = [];
+    if (Bon.eingang) { api('DELETE', '/api/eingang/' + Bon.eingang).catch(() => {}); Bon.eingang = null; }
     await neuLaden();
   });
 }
@@ -2163,6 +2173,38 @@ function kiSpeichern(testen) {
       el.textContent = '✓ ' + r.meldung; el.style.color = 'var(--green)';
     } catch (e) { el.textContent = '✗ ' + e.message; el.style.color = 'var(--red)'; }
   });
+}
+
+// ============================================================
+// EINGANG: geteilte Datei (Teilen-Menü → Kurzbefehl) einem Projekt zuordnen
+// ============================================================
+async function zeigeEingang(eid) {
+  $('#view').innerHTML = '<div class="leer">Datei wird geladen…</div>';
+  const res = await fetch('/api/eingang/' + encodeURIComponent(eid));
+  if (!res.ok) throw new Error('Die geteilte Datei ist nicht mehr vorhanden (wird nach 14 Tagen gelöscht).');
+  const name = res.headers.get('X-Dateiname') || 'beleg';
+  const blob = await res.blob();
+  const pd = await api('GET', '/api/projects');
+  $('#view').innerHTML = `<div class="listenkopf"><div><h1>Beleg zuordnen</h1>
+      <div class="muted">${esc(name)}</div></div></div>
+    <p>Zu welchem Projekt gehört der Beleg?</p>
+    ${pd.projects.map(p => `<div class="box" style="padding:12px; cursor:pointer" data-eingang-p="${p.id}">
+      <b>${esc(p.name)}</b>${p.description ? `<div class="muted">${esc(p.description)}</div>` : ''}</div>`).join('')
+      || '<p class="muted">Noch kein Projekt angelegt.</p>'}
+    <button class="hell" onclick="api('DELETE','/api/eingang/${esc(eid)}').finally(() => location.hash = '#/')">Verwerfen</button>`;
+  document.querySelectorAll('[data-eingang-p]').forEach(el => el.addEventListener('click', async () => {
+    location.hash = '#/p/' + el.dataset.eingangP;
+    // warten, bis das Projekt geladen ist, dann direkt die Belegerfassung öffnen
+    for (let i = 0; i < 50 && !(P && String(P.pid) === el.dataset.eingangP); i++)
+      await new Promise(r => setTimeout(r, 100));
+    await new Promise(r => setTimeout(r, 150));
+    const pdf = /\.pdf$/i.test(name) || blob.type === 'application/pdf';
+    const datei = pdf ? blob : await bonVerkleinern(blob);
+    Bon.fotos.forEach(f => URL.revokeObjectURL(f.url));
+    Bon.fotos = [{ blob: datei, url: URL.createObjectURL(datei), pdf, name }];
+    Bon.erg = null; Bon.task = null; Bon.eingang = eid;
+    bonFotos();
+  }));
 }
 
 // Belege/Fotos in einer Vollbild-Ebene mit Schließen-Knopf zeigen statt die Seite zu verlassen

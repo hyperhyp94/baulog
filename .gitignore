@@ -7,3 +7,4 @@ data/uploads/
 config.local.json
 .DS_Store
 data/ki-einstellungen.json*
+data/eingang/

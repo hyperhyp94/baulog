@@ -1838,12 +1838,17 @@ def api_receipts_analyze():
     if len(files) > receipts.MAX_IMAGES:
         return _err(f"Maximal {receipts.MAX_IMAGES} Bilder pro Beleg.")
     images = []
-    for f in files:
-        media = _MEDIA_BY_EXT.get(Path(secure_filename(f.filename or "")).suffix.lower())
-        if not media:
-            return _err("Nur JPEG, PNG oder WebP erlaubt.")
-        images.append((f.read(), media))
     try:
+        for f in files:
+            ext = Path(secure_filename(f.filename or "")).suffix.lower()
+            if ext == ".pdf":
+                images.extend(receipts.pdf_zu_bildern(f.read(), receipts.MAX_IMAGES - len(images)))
+                continue
+            media = _MEDIA_BY_EXT.get(ext)
+            if not media:
+                return _err("Nur Fotos (JPEG, PNG, WebP) oder PDF erlaubt.")
+            images.append((f.read(), media))
+        images = images[:receipts.MAX_IMAGES]
         result = receipts.analyze(images, CONFIG_PATH)
     except receipts.ReceiptError as exc:
         return _err(str(exc), exc.status)
@@ -1872,6 +1877,74 @@ def api_ki_test():
         return _ok(meldung=receipts.verbindung_testen(CONFIG_PATH))
     except receipts.ReceiptError as exc:
         return _err(str(exc), exc.status)
+
+
+# ---------------------------------------------------------------------------
+# Eingang: Datei aus dem Teilen-Menü (iPhone-Kurzbefehl) zwischenlagern; die
+# Oberfläche öffnet dann #/eingang/<id>, dort wird Projekt + Aufgabe gewählt.
+# ---------------------------------------------------------------------------
+
+EINGANG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "eingang")
+_EINGANG_EXT = {".pdf", ".jpg", ".jpeg", ".png", ".webp"}
+
+
+@app.route("/api/eingang", methods=["POST"])
+def api_eingang_post():
+    """multipart: file (PDF oder Foto, max. 20 MB). Antwort: id + url zum Öffnen."""
+    import uuid
+    f = request.files.get("file")
+    if f is None:
+        # manche Kurzbefehle schicken die Datei unter anderem Feldnamen
+        f = next(iter(request.files.values()), None)
+    if f is None:
+        return _err("Keine Datei übergeben (Feld 'file').")
+    name = secure_filename(f.filename or "") or "beleg.pdf"
+    ext = Path(name).suffix.lower()
+    data = f.read()
+    if not ext and data.startswith(b"%PDF"):
+        ext, name = ".pdf", name + ".pdf"
+    if ext not in _EINGANG_EXT:
+        return _err("Nur PDF oder Fotos erlaubt.")
+    if not data or len(data) > 20 * 1024 * 1024:
+        return _err("Datei leer oder größer als 20 MB.")
+    os.makedirs(EINGANG_DIR, exist_ok=True)
+    grenze = time.time() - 14 * 86400
+    for alt in os.listdir(EINGANG_DIR):
+        pfad = os.path.join(EINGANG_DIR, alt)
+        if os.path.getmtime(pfad) < grenze:
+            os.remove(pfad)
+    eid = uuid.uuid4().hex[:16]
+    with open(os.path.join(EINGANG_DIR, f"{eid}__{name}"), "wb") as fh:
+        fh.write(data)
+    url = request.host_url.rstrip("/") + f"/#/eingang/{eid}"
+    return _ok(id=eid, url=url, name=name), 201
+
+
+def _eingang_datei(eid):
+    if not eid.isalnum() or not os.path.isdir(EINGANG_DIR):
+        return None
+    for n in os.listdir(EINGANG_DIR):
+        if n.startswith(eid + "__"):
+            return n
+    return None
+
+
+@app.route("/api/eingang/<eid>", methods=["GET"])
+def api_eingang_get(eid):
+    n = _eingang_datei(eid)
+    if not n:
+        return _err("Datei nicht (mehr) vorhanden.", 404)
+    resp = send_from_directory(EINGANG_DIR, n)
+    resp.headers["X-Dateiname"] = n.split("__", 1)[1]
+    return resp
+
+
+@app.route("/api/eingang/<eid>", methods=["DELETE"])
+def api_eingang_delete(eid):
+    n = _eingang_datei(eid)
+    if n:
+        os.remove(os.path.join(EINGANG_DIR, n))
+    return _ok()
 
 
 # ---------------------------------------------------------------------------

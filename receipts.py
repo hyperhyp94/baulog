@@ -195,6 +195,29 @@ def enabled(config_path: str) -> bool:
     return bool(load_config(config_path)["api_key"])
 
 
+def pdf_zu_bildern(data: bytes, max_seiten: int = MAX_IMAGES) -> list[tuple[bytes, str]]:
+    """Rendert die ersten Seiten eines PDFs als JPEG (pdftoppm, 150 dpi)."""
+    import glob
+    import subprocess
+    import tempfile
+    if not data.startswith(b"%PDF"):
+        raise ReceiptError("Die Datei ist kein gültiges PDF.")
+    with tempfile.TemporaryDirectory() as tmp:
+        quelle = os.path.join(tmp, "in.pdf")
+        with open(quelle, "wb") as fh:
+            fh.write(data)
+        try:
+            subprocess.run(["pdftoppm", "-r", "150", "-jpeg", "-jpegopt", "quality=85",
+                            "-f", "1", "-l", str(max_seiten), quelle, os.path.join(tmp, "s")],
+                           check=True, capture_output=True, timeout=60)
+        except (OSError, subprocess.SubprocessError):
+            raise ReceiptError("PDF konnte nicht gelesen werden.")
+        seiten = sorted(glob.glob(os.path.join(tmp, "s-*.jpg")))
+        if not seiten:
+            raise ReceiptError("Das PDF enthält keine Seiten.")
+        return [(open(f, "rb").read(), "image/jpeg") for f in seiten]
+
+
 def _num(val, default=0.0) -> float:
     if isinstance(val, bool):
         return default
