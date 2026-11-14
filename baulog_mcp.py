@@ -58,7 +58,15 @@ def _request(method: str, path: str, payload: dict | None = None) -> dict:
     return _send(method, path, body, headers)
 
 
+import threading as _threading
+_VORSCHAU = _threading.local()
+
+
 def _send(method: str, path: str, body: bytes | None, headers: dict) -> dict:
+    if method != "GET" and getattr(_VORSCHAU, "an", False):
+        # Vorschau: nichts schreiben, nur merken, was gesendet würde
+        _VORSCHAU.requests.append(f"{method} {path}")
+        return {"status": "ok", "id": None, "vorschau": True}
     headers = {**headers, "X-Baulog-Quelle": "Hermes/MCP"}  # für das Änderungsprotokoll
     """
     Schickt einen fertigen Request-Body an die API (JSON oder Multipart).
@@ -1908,14 +1916,128 @@ register_tool("verlauf", verlauf)
 REGELN = """Baulog (Bautagebuch von Sven): Projekte, Stunden, Material, Belege, Auszahlungen.
 Regeln für sicheres Arbeiten:
 1. Projekt nie raten: bei Unklarheit projekte_liste zeigen und nachfragen. IDs immer aus Listen holen.
-2. Löschen und Geld (person_auszahlung, guthaben_einzahlen, person_bezahlt_markieren, *_loeschen):
-   vorher zusammenfassen (Projekt, Person, Betrag/Datum) und auf ein klares „Ja“ von Sven warten.
+2. JEDE Buchung/Änderung/Löschung läuft in zwei Schritten: erster Aufruf ohne freigabe liefert nur eine
+   Vorschau (nichts gebucht). Felder Sven zeigen, sein klares „Ja“ abwarten, dann mit freigabe=<Code> buchen.
+   Nie freigabe ohne Svens Ja verwenden, nie Werte zwischen Vorschau und Buchung ändern.
 3. Vor jeder Buchung den Stand prüfen (projekt_uebersicht, guthaben_stand, verlauf) – nichts doppelt buchen.
 4. Pauschale Auszahlung („Robert 500 € gegeben“) = guthaben_einzahlen: älteste Tage zuerst, Rest bleibt Guthaben.
 5. „offen“ enthält Auszahlungen/Guthaben bereits – nie noch einmal abziehen.
 6. Fragen zu Preisen/Material: suche; Auswertungen: frage oder projekt_uebersicht. Belege als „Beleg N“ nennen.
 7. Nach jeder Änderung kurz den neuen Stand nennen. Alles steht im Verlauf und ist dort rückgängig zu machen.
 8. Bei Fehlern die Meldung wörtlich weitergeben, nicht raten oder erfinden."""
+
+
+# ---------------------------------------------------------------------------
+# Zwei-Schritt-Freigabe: jede Buchung erst als Vorschau, dann nur mit Code
+# ---------------------------------------------------------------------------
+
+import hashlib as _hashlib
+import inspect as _inspect
+import time as _time
+import functools as _functools
+
+_FREIGABEN: dict[str, tuple[str, float]] = {}
+_FREIGABE_MINUTEN = 15
+_SCHREIB_TOOLS = re.compile(r"(_anlegen|_bearbeiten|_loeschen|auszahlung|einzahlen|markieren|^bon_erfassen$|^dokument_hochladen$)")
+
+
+def _freigabe_schluessel(name: str, kw: dict) -> str:
+    return name + "|" + json.dumps(kw, sort_keys=True, ensure_ascii=False, default=str)
+
+
+def _eintrag_suchen(art: str, eid: int):
+    """Zeit- oder Materialeintrag samt Baustelle/Aufgabe finden (für die Lösch-Vorschau)."""
+    for site in (_get("/api/sites") or {}).get("sites") or []:
+        for t in (_get(f"/api/sites/{site['id']}/tasks") or {}).get("tasks") or []:
+            for e in (_get(f"/api/tasks/{t['id']}") or {}).get(art) or []:
+                if e.get("id") == eid:
+                    return {"baustelle": site.get("name"), "aufgabe": t.get("title"), **e}
+    return None
+
+
+def _vorschau_ergaenzen(name: str, kw: dict, felder: dict) -> dict:
+    """Vorschau mit Klartext anreichern: was genau gelöscht wird, Stand vor einer Geldbuchung."""
+    try:
+        if name == "material_loeschen":
+            e = _eintrag_suchen("materials", int(kw.get("material_id")))
+            if e:
+                return {"wird_geloescht": {k: e.get(k) for k in ("baustelle", "aufgabe", "name", "qty", "unit",
+                        "unit_price", "store", "purchase_date", "paid")}}
+        if name == "zeiteintrag_loeschen":
+            e = _eintrag_suchen("time_entries", int(kw.get("zeiteintrag_id")))
+            if e:
+                return {"wird_geloescht": {k: e.get(k) for k in ("baustelle", "aufgabe", "person", "work_date",
+                        "hours", "hourly_rate", "travel_cost", "kosten", "paid")}}
+        if name in ("person_auszahlung", "guthaben_einzahlen", "person_bezahlt_markieren") and kw.get("projekt_id"):
+            proj = (_get(f"/api/projects/{kw['projekt_id']}") or {}).get("project") or {}
+            stand = _get(f"/api/projects/{kw['projekt_id']}/guthaben?person={urllib.parse.quote(str(kw.get('person', '')))}")
+            return {"projekt": proj.get("name"), **felder,
+                    "guthaben_vorher": stand.get("saldo") if isinstance(stand, dict) else None}
+    except Exception:  # noqa: BLE001 — Vorschau darf nie an der Anreicherung scheitern
+        pass
+    return felder
+
+
+def _mit_freigabe(name: str, fn):
+    @_functools.wraps(fn)
+    def tool(freigabe: str = "", **kw):
+        schluessel = _freigabe_schluessel(name, kw)
+        code = str(freigabe or "").strip()
+        if code:
+            eintrag = _FREIGABEN.get(code)
+            if not eintrag or eintrag[0] != schluessel:
+                return _fehler("Freigabe-Code passt nicht zu diesen Werten (Werte geändert?). Erst ohne "
+                               "freigabe aufrufen, Sven die neue Vorschau zeigen und sein Ja abwarten.")
+            if _time.time() - eintrag[1] > _FREIGABE_MINUTEN * 60:
+                _FREIGABEN.pop(code, None)
+                return _fehler("Freigabe abgelaufen – neue Vorschau erstellen und Sven erneut fragen.")
+            _FREIGABEN.pop(code, None)
+            res = fn(**kw)
+            if isinstance(res, dict) and _ok_antwort(res):
+                res["hinweis"] = "Gebucht. Sven kurz den neuen Stand nennen."
+            return res
+        # Schritt 1: Vorschau – alle Prüfungen laufen, aber nichts wird geschrieben
+        _VORSCHAU.an, _VORSCHAU.requests = True, []
+        try:
+            res = fn(**kw)
+        finally:
+            _VORSCHAU.an = False
+        if not isinstance(res, dict) or not _ok_antwort(res):
+            return res  # Prüfung schlug fehl → Fehlermeldung direkt
+        felder = res.get("gebucht") or {k: v for k, v in kw.items() if v not in (None, "")}
+        if "_loeschen" in name:
+            pfad = next((r.split(" ", 1)[1] for r in _VORSCHAU.requests if r.startswith("DELETE ")), None)
+            info = _get(pfad) if pfad else None
+            if info and _ok_antwort(info):
+                felder = {"wird_geloescht": {k: v for k, v in info.items() if k != "status"}}
+        felder = _vorschau_ergaenzen(name, kw, felder)
+        code = _hashlib.sha1(f"{schluessel}{_time.time()}".encode()).hexdigest()[:6]
+        _FREIGABEN[code] = (schluessel, _time.time())
+        return {"status": "vorschau", "noch_nicht_gebucht": True, "aktion": name,
+                "bitte_sven_zeigen": felder, "freigabe": code,
+                "anweisung": ("NOCH NICHTS GEBUCHT. Zeige Sven diese Felder übersichtlich (eine Zeile je Feld) "
+                              "und frage: „Soll ich das so buchen?“. NUR nach seinem klaren Ja dasselbe Tool mit "
+                              f"IDENTISCHEN Werten und freigabe=\"{code}\" erneut aufrufen. Bei Änderungswunsch: "
+                              f"neue Vorschau ohne freigabe. Code gilt {_FREIGABE_MINUTEN} Minuten.")}
+
+    sig = _inspect.signature(fn)
+    params = list(sig.parameters.values()) + [
+        _inspect.Parameter("freigabe", _inspect.Parameter.KEYWORD_ONLY, default="", annotation=str)]
+    tool.__signature__ = sig.replace(parameters=params)
+    tool.__doc__ = ("ZWEI SCHRITTE: 1. ohne freigabe aufrufen → Vorschau (es wird NICHTS gebucht), Sven die "
+                    "Felder zeigen und bestätigen lassen; 2. nach seinem Ja mit identischen Werten und "
+                    "freigabe=<Code aus der Vorschau> erneut aufrufen.\n" + (fn.__doc__ or ""))
+    return tool
+
+
+def _freigabe_aktivieren():
+    from mcp_helper import TOOL_REGISTRY
+    for name, fn in list(TOOL_REGISTRY.items()):
+        if _SCHREIB_TOOLS.search(name):
+            TOOL_REGISTRY[name] = _mit_freigabe(name, fn)
+
+
+_freigabe_aktivieren()
 
 if __name__ == "__main__":
     run_server(instructions=REGELN)
