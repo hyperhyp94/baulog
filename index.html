@@ -169,6 +169,8 @@
                flex-direction: column; gap: 2px; }
     .zahlung.offen { background: #fff; color: var(--amber); }
     .zahlung.bezahlt { background: #EAF4EF; color: var(--green); }
+    .beleg-link { background: none; border: 0; color: var(--green); font-size: 12px; padding: 0 6px;
+                  white-space: nowrap; min-height: 0; cursor: pointer; text-decoration: underline; }
     .zahlung.teil { background: #FFF6E0; color: var(--amber); }
     @media (max-width:420px) { .zahlung { width: 72px; } .e-typ { display: none; } }
     @media (max-width:639px) {
@@ -864,14 +866,13 @@ function htmlBon(g) {
   return `<div class="eintrag">
     <button class="e-haupt" onclick="bonAufklappen(${g.rid})" aria-expanded="${offen}">
       <span class="e-typ material">Bon</span>
-      <span class="e-text"><b>${offen ? '▾' : '▸'} ${esc(b.store || g.pos[0].roh.store || 'Kassenbon')}</b><small>${unter}</small></span>
+      <span class="e-text"><b>${offen ? '▾' : '▸'} ${b.beleg_nr ? `Beleg ${b.beleg_nr} · ` : ''}${esc(b.store || g.pos[0].roh.store || 'Kassenbon')}</b><small>${unter}</small></span>
       <span class="e-betrag">${euro(summe)}</span>
     </button>
     <button class="zahlung ${alleBezahlt ? 'bezahlt' : (gezahlt > 0 ? 'teil' : 'offen')}" onclick="bonBezahlt(${g.rid})"
       title="Ganzen Bon als ${alleBezahlt ? 'offen' : 'bezahlt'} markieren">${alleBezahlt ? '✓ bezahlt' : (gezahlt > 0 ? `<span>teilweise</span><span>${euro(gezahlt)}</span>` : 'offen')}</button>
   </div>${offen ? `<div style="margin:0 0 6px 18px; border-left:3px solid var(--line)">${g.pos.map(htmlEintrag).join('')}
-    ${P.docs.filter(d => d.receipt_id === g.rid).length ? `<p class="hinweis" style="margin:6px 8px">Bon-Fotos: ${P.docs.filter(d => d.receipt_id === g.rid)
-      .map((d, i) => `<a href="/api/documents/${d.id}/file" target="_blank" rel="noopener">Foto ${i + 1}</a>`).join(' · ')}</p>` : ''}</div>` : ''}`;
+    ${P.docs.some(d => d.receipt_id === g.rid) ? `<p style="margin:6px 8px"><button class="hell klein" onclick="belegOeffnen(${g.rid})">📎 ${belegName(g.rid)} ansehen</button></p>` : ''}</div>` : ''}`;
 }
 
 function bonAufklappen(rid) {
@@ -907,12 +908,15 @@ function htmlEintrag(e) {
   const unter = [P.tasks.length > 1 ? esc(aufgabeName(e.task_id)) : '', detail,
     e.billed ? '' : '<span style="color:var(--red)">ohne Rechnung</span>']
     .filter(Boolean).join(' · ');
+  const rid = e.art === 'material' ? e.roh.receipt_id : null;
+  const belegLink = rid && P.docs.some(d => d.receipt_id === rid)
+    ? `<button class="beleg-link" onclick="event.stopPropagation(); belegOeffnen(${rid})" title="Beleg ansehen">📎 ${belegName(rid)}</button>` : '';
   return `<div class="eintrag">
     <button class="e-haupt" onclick="${e.art === 'zeit' ? 'formZeit' : 'formMaterial'}(${e.id})">
       <span class="e-typ ${e.art}">${e.art === 'zeit' ? 'Std' : 'Mat'}</span>
       <span class="e-text">${titel}<small>${unter}</small></span>
       <span class="e-betrag">${euro(e.betrag)}</span>
-    </button>
+    </button>${belegLink}
     <button class="zahlung ${e.paid ? 'bezahlt' : (e.gezahlt > 0 ? 'teil' : 'offen')}" onclick="umschaltenBezahlt('${e.art}', ${e.id})"
       title="${e.paid ? 'Bezahlt – antippen, um wieder auf offen zu setzen' : (e.gezahlt > 0 ? 'Teilweise bezahlt – antippen für komplett bezahlt' : 'Offen – antippen, wenn bezahlt')}">${e.paid ? '✓ bezahlt' : (e.gezahlt > 0 ? `<span>teilweise</span><span>${euro(e.gezahlt)}</span>` : 'offen')}</button>
   </div>`;
@@ -1006,6 +1010,7 @@ function htmlBelege() {
       <a class="doc-bild" href="${datei}" target="_blank" rel="noopener">
         ${bild ? `<img src="${datei}" alt="" loading="lazy" onerror="this.replaceWith('Bild fehlt')">` : 'PDF'}</a>
       <div class="doc-info">
+        ${d.receipt_id ? `<div><b>${belegName(d.receipt_id)}</b></div>` : ''}
         <div class="doc-name">${esc(d.filename)}</div>
         <div class="muted">${DOC_TYPEN[d.doc_type] || esc(d.doc_type || '')} · ${datumKurz(lokalesDatum(d.created_at))}</div>
         <div class="muted">${esc(zu)}</div>
@@ -1519,6 +1524,9 @@ function formMaterial(id, vorgabe) {
 
   openModal(`${modalKopf(m ? 'Material bearbeiten' : 'Material / Kosten erfassen')}
     <div class="modal-body">
+      ${m && m.receipt_id ? `<div class="unterfeld" style="margin-top:0; display:flex; gap:8px; align-items:center; flex-wrap:wrap">
+        Gehört zu <b>${belegName(m.receipt_id)}</b>${(P.bons[m.receipt_id] || {}).store ? ' · ' + esc(P.bons[m.receipt_id].store) : ''}
+        ${P.docs.some(d => d.receipt_id === m.receipt_id) ? `<button type="button" class="hell klein" onclick="belegOeffnen(${m.receipt_id})">📎 Beleg ansehen</button>` : ''}</div>` : ''}
       ${!m && App.receipts ? `<div class="unterfeld" style="margin:0 0 6px">
         <button type="button" style="width:100%" onclick="bonAusMaterial()">📷 Kassenbon / Rechnung fotografieren</button>
         <p class="hinweis" style="margin:6px 0 0">Die Positionen vom Bon werden ausgelesen und nach deiner Prüfung
@@ -2388,12 +2396,26 @@ async function berichtErstellen() {
 
 // Belege/Fotos in einer Vollbild-Ebene mit Schließen-Knopf zeigen statt die Seite zu verlassen
 // (in der Home-Bildschirm-App gibt es keinen Zurück-Knopf).
-function belegZeigen(url) {
+// Beleg-Nummer je Projekt ("Beleg 3") und Ansicht aller Dateien eines Belegs
+function belegName(rid) {
+  const b = P && P.bons[rid];
+  return b && b.beleg_nr ? `Beleg ${b.beleg_nr}` : 'Beleg';
+}
+function belegOeffnen(rid) {
+  const docs = P.docs.filter(d => d.receipt_id === rid)
+    .sort((a, b) => (a.created_at < b.created_at ? -1 : 1));
+  if (!docs.length) return showError('Zu diesem Beleg ist keine Datei gespeichert.');
+  belegZeigen(`/api/documents/${docs[0].id}/file`, docs.map(d => `/api/documents/${d.id}/file`),
+    `${belegName(rid)}${P.bons[rid] && P.bons[rid].store ? ' · ' + P.bons[rid].store : ''}`);
+}
+
+function belegZeigen(url, alle, titel) {
   const o = document.createElement('div');
   o.id = 'beleg-ansicht';
   o.style.cssText = 'position:fixed;inset:0;z-index:9999;background:#000;display:flex;flex-direction:column';
   o.innerHTML = `<div style="display:flex;gap:8px;padding:calc(env(safe-area-inset-top) + 8px) 12px 8px;background:#1A1A1A">
-      <button id="beleg-zu" style="font-size:18px;padding:10px 16px">✕ Schließen</button><span class="spacer" style="flex:1"></span>
+      <button id="beleg-zu" style="font-size:18px;padding:10px 16px">✕ Schließen</button>
+      <span style="flex:1;color:#fff;align-self:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(titel || '')}</span>
       <a href="${url}" download style="color:#fff;align-self:center">Speichern</a></div>
     <div id="beleg-platz" style="flex:1;overflow:auto;-webkit-overflow-scrolling:touch;display:flex;flex-direction:column;align-items:center">
       <div style="color:#aaa;margin-top:40px">Wird geladen …</div></div>`;
@@ -2402,7 +2424,12 @@ function belegZeigen(url) {
   document.body.appendChild(o);
   history.pushState({ beleg: 1 }, '');
   window.addEventListener('popstate', zu);
-  belegInhalt(url, o.querySelector('#beleg-platz'));
+  const platz = o.querySelector('#beleg-platz');
+  const liste = alle && alle.length ? alle : [url];
+  if (liste.length === 1) return belegInhalt(url, platz);
+  platz.innerHTML = liste.map((u, i) => `<div style="flex:none;color:#aaa;font-size:13px;margin:12px 0 0">Datei ${i + 1} von ${liste.length}</div>
+    <div class="beleg-teil" style="flex:none;width:100%;display:flex;flex-direction:column;align-items:center"></div>`).join('');
+  platz.querySelectorAll('.beleg-teil').forEach((el, i) => belegInhalt(liste[i], el));
 }
 
 // PDFs immer als Seitenbilder untereinander: Safari auf dem iPhone zeigt ein PDF

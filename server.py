@@ -1527,7 +1527,8 @@ def api_receipt_create(task_id: int):
             422)
     rid, ids = db.create_receipt_with_materials(
         task_id, store, pdate, round(total, 2), positions, billed=billed, paid=paid)
-    return _ok(id=rid, material_ids=ids, summe=summe), 201
+    beleg = db.get_receipt(rid)
+    return _ok(id=rid, material_ids=ids, summe=summe, beleg_nr=beleg["beleg_nr"] if beleg else None), 201
 
 
 @app.route("/api/receipts", methods=["GET"])

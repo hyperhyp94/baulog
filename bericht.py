@@ -262,7 +262,7 @@ td {{ padding: 3px 4px; border-bottom: 1px solid #ECECE8; vertical-align: top; }
             if rid and rid not in gezeigt and rid in d["bons"]:
                 gezeigt.add(rid)
                 b = d["bons"][rid]
-                teile.append(f'<tr class="bon"><td>{datum(b["purchase_date"])}</td><td colspan="4">Bon {e(b["store"] or "")}</td>'
+                teile.append(f'<tr class="bon"><td>{datum(b["purchase_date"])}</td><td colspan="4">{"Beleg " + str(b["beleg_nr"]) + " · " if b["beleg_nr"] else "Bon "}{e(b["store"] or "")}</td>'
                              f'<td class="r">{euro(b["total"])}</td><td></td></tr>')
             betrag = round(m["qty"] * m["unit_price"], 2)
             g = gezahlt(betrag, m)
@@ -285,6 +285,8 @@ td {{ padding: 3px 4px; border-bottom: 1px solid #ECECE8; vertical-align: top; }
                 uri = bild_data_uri(x["stored_path"])
                 if uri:
                     art = "Beleg" if x["doc_type"] in ("beleg", "rechnung") else "Foto"
+                    if x["receipt_id"] in d["bons"] and d["bons"][x["receipt_id"]]["beleg_nr"]:
+                        art = f'Beleg {d["bons"][x["receipt_id"]]["beleg_nr"]}'
                     teile.append(f'<div class="foto"><img src="{uri}"><div class="klein">{art} · '
                                  f'{datum(x["created_at"])} · {e(x["filename"])}</div></div>')
             teile.append("</div>")

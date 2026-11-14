@@ -32,7 +32,7 @@ def get_conn() -> sqlite3.Connection:
     return conn
 
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 _INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_sites_project ON sites(project_id)",
@@ -295,6 +295,24 @@ def _migrate_v6(conn: sqlite3.Connection) -> None:
         conn.execute("PRAGMA user_version = 6")
 
 
+def _migrate_v7(conn: sqlite3.Connection) -> None:
+    """v6 → v7: Beleg-Nummer je Projekt (1, 2, 3 …) an jedem Bon / jeder Rechnung."""
+    with conn:
+        cols = [r["name"] for r in conn.execute("PRAGMA table_info(receipts)")]
+        if "beleg_nr" not in cols:
+            conn.execute("ALTER TABLE receipts ADD COLUMN beleg_nr INTEGER")
+        # vorhandene Belege je Projekt nach Kaufdatum durchnummerieren
+        rows = conn.execute(
+            "SELECT r.id, s.project_id FROM receipts r JOIN tasks t ON t.id = r.task_id "
+            "JOIN sites s ON s.id = t.site_id ORDER BY s.project_id, r.purchase_date, r.id").fetchall()
+        zaehler = {}
+        for r in rows:
+            zaehler[r["project_id"]] = zaehler.get(r["project_id"], 0) + 1
+            conn.execute("UPDATE receipts SET beleg_nr = ? WHERE id = ? AND beleg_nr IS NULL",
+                         (zaehler[r["project_id"]], r["id"]))
+        conn.execute("PRAGMA user_version = 7")
+
+
 def init_db() -> None:
     """Legt das Basis-Schema an und führt ausstehende Migrationen aus."""
     conn = get_conn()
@@ -315,6 +333,8 @@ def init_db() -> None:
             _migrate_v5(conn)
         if _user_version(conn) < 6:
             _migrate_v6(conn)
+        if _user_version(conn) < 7:
+            _migrate_v7(conn)
     install_changelog(conn)
     conn.close()
 
@@ -1321,10 +1341,16 @@ def create_receipt_with_materials(
     conn = get_conn()
     try:
         with conn:
+            # nächste Beleg-Nummer im Projekt (1, 2, 3 …)
+            nr = conn.execute(
+                "SELECT COALESCE(MAX(r.beleg_nr), 0) + 1 FROM receipts r JOIN tasks t ON t.id = r.task_id "
+                "WHERE t.site_id IN (SELECT id FROM sites WHERE project_id = "
+                "(SELECT s.project_id FROM tasks t2 JOIN sites s ON s.id = t2.site_id WHERE t2.id = ?))",
+                (task_id,)).fetchone()[0]
             cur = conn.execute(
-                "INSERT INTO receipts (task_id, store, purchase_date, total, created_at) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (task_id, store, purchase_date, total, _now()),
+                "INSERT INTO receipts (task_id, store, purchase_date, total, created_at, beleg_nr) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (task_id, store, purchase_date, total, _now(), nr),
             )
             rid = cur.lastrowid
             ids = []
