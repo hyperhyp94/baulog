@@ -2224,6 +2224,81 @@ def api_projekt_bericht(pid: int):
 
 
 # ---------------------------------------------------------------------------
+# Suche über alle Projekte: Materialpositionen/Belege im Baulog + Volltext in Paperless
+# ---------------------------------------------------------------------------
+
+def _such_norm(text: str) -> str:
+    """Kleinbuchstaben, ohne Leer-/Satzzeichen: 'SH 45' == 'sh45' == 'SH-45'."""
+    import re
+    return re.sub(r"[^0-9a-zäöüß]+", "", (text or "").lower())
+
+
+@app.route("/api/suche", methods=["GET"])
+def api_suche():
+    """
+    Query: q (Suchtext). Liefert Treffer in Materialpositionen (mit Preis, Datum, Markt,
+    Projekt, Beleg-Nr. und Beleg-Dateien), eine Preisübersicht und Volltext-Treffer aus Paperless.
+    """
+    import re
+    q = (request.args.get("q") or "").strip()
+    if len(q) < 2:
+        return _err("Bitte mindestens 2 Zeichen eingeben.")
+    woerter = [w for w in re.split(r"\s+", q) if w]
+    q_norm = _such_norm(q)
+    conn = db.get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT m.*, t.title AS task, p.id AS project_id, p.name AS project, "
+            "r.beleg_nr, r.store AS bon_store, r.purchase_date AS bon_datum "
+            "FROM materials m JOIN tasks t ON t.id = m.task_id JOIN sites s ON s.id = t.site_id "
+            "JOIN projects p ON p.id = s.project_id LEFT JOIN receipts r ON r.id = m.receipt_id").fetchall()
+        docs = {}
+        for x in conn.execute("SELECT id, receipt_id, mime, filename FROM documents WHERE receipt_id IS NOT NULL "
+                              "ORDER BY created_at, id").fetchall():
+            docs.setdefault(x["receipt_id"], []).append(x["id"])
+    finally:
+        conn.close()
+    treffer = []
+    for m in rows:
+        heu = f"{m['name']} {m['store'] or ''} {m['bon_store'] or ''}"
+        heu_norm = _such_norm(heu)
+        if q_norm in heu_norm or all(_such_norm(w) in heu_norm for w in woerter):
+            betrag = round(m["qty"] * m["unit_price"], 2)
+            treffer.append({
+                "id": m["id"], "name": m["name"], "menge": m["qty"], "einheit": m["unit"],
+                "einzelpreis": round(m["unit_price"], 2), "betrag": betrag,
+                "datum": m["purchase_date"] or m["bon_datum"] or (m["created_at"] or "")[:10],
+                "markt": m["store"] or m["bon_store"], "projekt": m["project"], "project_id": m["project_id"],
+                "aufgabe": m["task"], "beleg_nr": m["beleg_nr"], "receipt_id": m["receipt_id"],
+                "beleg_dateien": docs.get(m["receipt_id"], []), "bezahlt": bool(m["paid"]),
+                "ohne_rechnung": not m["billed"]})
+    treffer.sort(key=lambda t: t["datum"] or "", reverse=True)
+    uebersicht = None
+    if treffer:
+        preise = [t["einzelpreis"] for t in treffer]
+        uebersicht = {"anzahl": len(treffer), "summe": round(sum(t["betrag"] for t in treffer), 2),
+                      "menge": round(sum(t["menge"] for t in treffer), 2),
+                      "preis_min": min(preise), "preis_max": max(preise),
+                      "preis_zuletzt": treffer[0]["einzelpreis"], "zuletzt": treffer[0]["datum"]}
+
+    paperless = []
+    url, token = _load_paperless_config()
+    if url and token:
+        try:
+            r = requests.get(f"{url}/api/documents/", timeout=10, headers={"Authorization": f"Token {token}"},
+                             params={"query": q, "page_size": 10, "fields": "id,title,created"})
+            for x in (r.json().get("results") or []) if r.ok else []:
+                hl = (x.get("__search_hit__") or {}).get("highlights") or ""
+                hl = re.sub(r"<span[^>]*>(.*?)</span>", r"[[\1]]", hl)
+                hl = re.sub(r"<[^>]+>", "", hl)
+                paperless.append({"id": x["id"], "titel": x.get("title"), "datum": (x.get("created") or "")[:10],
+                                  "auszug": hl[:400], "url": f"{url}/documents/{x['id']}"})
+        except (requests.RequestException, ValueError):
+            paperless = None
+    return _ok(q=q, treffer=treffer[:200], uebersicht=uebersicht, paperless=paperless)
+
+
+# ---------------------------------------------------------------------------
 # Einstiegspunkt
 # ---------------------------------------------------------------------------
 

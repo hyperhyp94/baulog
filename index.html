@@ -272,6 +272,7 @@
       <a href="#/" data-nav="projekte">Projekte</a>
       <a href="#/personen" data-nav="personen">Personen</a>
       <a href="#/verlauf" data-nav="verlauf">Verlauf</a>
+      <a href="#/suche" data-nav="suche" title="Suche" aria-label="Suche">🔍</a>
       <a href="javascript:void 0" onclick="kiEinstellungen()" title="KI für Kassenbons einstellen" aria-label="KI-Einstellungen">⚙</a>
     </nav>
   </div>
@@ -508,13 +509,14 @@ async function route() {
   const teile = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean);
   closeModal();
   document.querySelectorAll('.kopf-links a').forEach(a =>
-    a.classList.toggle('aktiv', a.dataset.nav === (['personen', 'verlauf'].includes(teile[0]) ? teile[0] : 'projekte')));
+    a.classList.toggle('aktiv', a.dataset.nav === (['personen', 'verlauf', 'suche'].includes(teile[0]) ? teile[0] : 'projekte')));
   try {
     if (teile[0] === 'p' && /^\d+$/.test(teile[1])) return await zeigeProjekt(Number(teile[1]), teile[2] || 'logbuch');
     // Alte Links (#/projekte/5) weiterhin auflösen
     if (teile[0] === 'projekte' && /^\d+$/.test(teile[1])) return location.replace('#/p/' + teile[1]);
     if (teile[0] === 'personen') return await zeigePersonen();
     if (teile[0] === 'verlauf') return await zeigeVerlauf();
+    if (teile[0] === 'suche') return await zeigeSuche(teile[1] ? decodeURIComponent(teile.slice(1).join('/')) : '');
     if (teile[0] === 'eingang' && teile[1]) return await zeigeEingang(teile[1]);
     return await zeigeProjekte();
   } catch (e) {
@@ -2400,6 +2402,62 @@ async function berichtErstellen() {
   } catch (e) {
     st.textContent = '✗ ' + e.message; st.style.color = 'var(--red)'; knopf.disabled = false;
   }
+}
+
+// ============================================================
+// SUCHE über alle Projekte (Material, Preise, Belege) + Paperless-Volltext
+// ============================================================
+async function zeigeSuche(q) {
+  P = null;
+  document.body.classList.remove('mit-leiste');
+  $('#view').innerHTML = `<div class="listenkopf"><div><h1>Suche</h1>
+      <div class="muted">Material, Preise und Belege in allen Projekten – plus Volltext in Paperless</div></div></div>
+    <form id="such-form" style="display:flex; gap:8px; margin:8px 0 14px">
+      <input id="such-q" type="search" placeholder="z. B. SH 45, Tiefgrund, Hornbach …" value="${esc(q || '')}" autofocus style="flex:1">
+      <button>Suchen</button></form>
+    <div id="such-erg"></div>`;
+  $('#such-form').onsubmit = ev => {
+    ev.preventDefault();
+    const v = $('#such-q').value.trim();
+    if (v) location.hash = '#/suche/' + encodeURIComponent(v);
+  };
+  if (!q) return;
+  $('#such-erg').innerHTML = '<div class="leer">Suche läuft …</div>';
+  let d;
+  try { d = await api('GET', '/api/suche?q=' + encodeURIComponent(q)); }
+  catch (e) { $('#such-erg').innerHTML = `<p style="color:var(--red)">${esc(e.message)}</p>`; return; }
+  const u = d.uebersicht;
+  const teile = [];
+  if (u) {
+    teile.push(`<div class="kpis" style="margin-bottom:10px">
+      <div class="kpi"><div class="zahl">${euro(u.preis_zuletzt)}</div><div class="label">zuletzt pro Einheit (${datumKurz(u.zuletzt)})</div></div>
+      <div class="kpi"><div class="zahl">${u.preis_min === u.preis_max ? euro(u.preis_min) : euro(u.preis_min) + ' – ' + euro(u.preis_max)}</div><div class="label">Preis pro Einheit</div></div>
+      <div class="kpi"><div class="zahl">${euro(u.summe)}</div><div class="label">gesamt ausgegeben · ${zahl(u.menge)} Einheiten · ${u.anzahl}× gekauft</div></div>
+    </div>`);
+    teile.push(`<h2>Im Baulog</h2>${d.treffer.map((t, i) => `<div class="box" style="padding:9px 12px; margin-bottom:6px">
+        <div style="display:flex; justify-content:space-between; gap:8px"><b>${esc(t.name)}</b><b style="white-space:nowrap">${euro(t.betrag)}</b></div>
+        <div class="muted" style="font-size:13px">${datumKurz(t.datum)} · ${zahl(t.menge)} ${esc(t.einheit || '')} × <b>${euro(t.einzelpreis)}</b>${t.ohne_rechnung ? ' · ohne Rechnung' : ''}</div>
+        <div class="muted" style="font-size:13px; display:flex; gap:6px; flex-wrap:wrap; align-items:center">${esc(t.markt || '')} ·
+          <a href="#/p/${t.project_id}">${esc(t.projekt)}</a>
+          ${t.beleg_dateien.length ? `<button class="beleg-link" onclick="sucheBeleg(${i})">📎 Beleg ${t.beleg_nr || ''}</button>` : ''}</div>
+      </div>`).join('')}`);
+  } else {
+    teile.push(`<p class="muted">Im Baulog keine Materialposition zu „${esc(q)}“ gefunden.</p>`);
+  }
+  if (d.paperless === null) teile.push('<p class="muted">Paperless war nicht erreichbar.</p>');
+  else if (d.paperless && d.paperless.length) {
+    teile.push(`<h2>In Paperless (Volltext der Belege)</h2>${d.paperless.map(x => `<div class="box" style="padding:10px 12px">
+      <a href="${esc(x.url)}" target="_blank" rel="noopener"><b>${esc(x.titel)}</b></a> <span class="muted">${datumKurz(x.datum)}</span>
+      ${x.auszug ? `<div class="muted" style="font-size:12px; white-space:pre-line; margin-top:4px">${esc(x.auszug)
+        .replace(/\[\[(.*?)\]\]/g, '<mark>$1</mark>')}</div>` : ''}</div>`).join('')}`);
+  } else if (d.paperless) teile.push(`<p class="muted">In Paperless nichts zu „${esc(q)}“ gefunden.</p>`);
+  $('#such-erg').innerHTML = teile.join('');
+  App.suchTreffer = d.treffer;
+}
+function sucheBeleg(i) {
+  const t = App.suchTreffer[i];
+  belegZeigen(`/api/documents/${t.beleg_dateien[0]}/file`, t.beleg_dateien.map(id => `/api/documents/${id}/file`),
+    `Beleg ${t.beleg_nr || ''} · ${t.markt || ''}`);
 }
 
 // Belege/Fotos in einer Vollbild-Ebene mit Schließen-Knopf zeigen statt die Seite zu verlassen
