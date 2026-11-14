@@ -4,7 +4,7 @@ baulog_mcp.py — MCP-Server für baulog.
 Dünner HTTP-Client auf die REST-API von server.py (Port 5112).
 Wird nach ~/hermes-tools/mcp/ kopiert; mcp_helper.py liegt dort im selben Verzeichnis.
 
-Alle Tools gemäß PLAN.md Abschnitt 9 (Stand: 41 registrierte Tools).
+Alle Tools gemäß PLAN.md Abschnitt 9 (Stand 14.11.: 52 registrierte Tools + Server-Regeln).
 
 Rückgabe-Konvention:
   * Erfolg:  {"status": "ok", ...}
@@ -341,6 +341,7 @@ def projekt_bearbeiten(projekt_id: int, name: str = None, note: str = None) -> d
 
 def projekt_loeschen(projekt_id: int) -> dict:
     """
+    SICHERHEIT: Nur auf ausdrückliche Anweisung von Sven. Vorher genau nennen, WAS gelöscht wird (Name, Betrag/Datum, Projekt) und auf ein klares „Ja“ warten. Rückgängig nur über den Baulog-Verlauf.
     Löscht ein Projekt inkl. aller zugehörigen Baustellen, Gewerke, Aufgaben,
     Zeiteinträge, Materialpositionen und Dokumente (Kaskade).
 
@@ -450,6 +451,7 @@ def baustelle_bearbeiten(
 
 def baustelle_loeschen(baustelle_id: int) -> dict:
     """
+    SICHERHEIT: Nur auf ausdrückliche Anweisung von Sven. Vorher genau nennen, WAS gelöscht wird (Name, Betrag/Datum, Projekt) und auf ein klares „Ja“ warten. Rückgängig nur über den Baulog-Verlauf.
     Löscht eine Baustelle inkl. aller Gewerke, Aufgaben, Zeiteinträge,
     Materialpositionen und Dokumente (Kaskade).
 
@@ -506,6 +508,7 @@ def gewerk_bearbeiten(gewerk_id: int, name: str) -> dict:
 
 def gewerk_loeschen(gewerk_id: int) -> dict:
     """
+    SICHERHEIT: Nur auf ausdrückliche Anweisung von Sven. Vorher genau nennen, WAS gelöscht wird (Name, Betrag/Datum, Projekt) und auf ein klares „Ja“ warten. Rückgängig nur über den Baulog-Verlauf.
     Löscht ein Gewerk. Aufgaben, die diesem Gewerk zugeordnet waren,
     behalten ihre Daten (trade_id wird auf NULL gesetzt).
 
@@ -679,6 +682,7 @@ def aufgabe_bearbeiten(
 
 def aufgabe_loeschen(aufgabe_id: int) -> dict:
     """
+    SICHERHEIT: Nur auf ausdrückliche Anweisung von Sven. Vorher genau nennen, WAS gelöscht wird (Name, Betrag/Datum, Projekt) und auf ein klares „Ja“ warten. Rückgängig nur über den Baulog-Verlauf.
     Löscht eine Aufgabe inkl. aller zugehörigen Zeiteinträge, Materialpositionen
     und Dokumente (Kaskade).
 
@@ -813,6 +817,7 @@ def zeiteintrag_bearbeiten(zeiteintrag_id: int, person: str = None,
 
 def zeiteintrag_loeschen(zeiteintrag_id: int) -> dict:
     """
+    SICHERHEIT: Nur auf ausdrückliche Anweisung von Sven. Vorher genau nennen, WAS gelöscht wird (Name, Betrag/Datum, Projekt) und auf ein klares „Ja“ warten. Rückgängig nur über den Baulog-Verlauf.
     Löscht einen Zeiteintrag.
 
     Parameter:
@@ -879,6 +884,7 @@ def person_bearbeiten(person_id: int, name: str = None, stundensatz: float = Non
 
 def person_loeschen(person_id: int) -> dict:
     """
+    SICHERHEIT: Nur auf ausdrückliche Anweisung von Sven. Vorher genau nennen, WAS gelöscht wird (Name, Betrag/Datum, Projekt) und auf ein klares „Ja“ warten. Rückgängig nur über den Baulog-Verlauf.
     Löscht eine Person ohne Zeiteinträge. Mit Zeiteinträgen liefert die API einen
     Fehler mit dem Hinweis, die Person stattdessen zu deaktivieren
     (person_bearbeiten mit aktiv=False).
@@ -1016,6 +1022,7 @@ def material_bearbeiten(
 
 def material_loeschen(material_id: int) -> dict:
     """
+    SICHERHEIT: Nur auf ausdrückliche Anweisung von Sven. Vorher genau nennen, WAS gelöscht wird (Name, Betrag/Datum, Projekt) und auf ein klares „Ja“ warten. Rückgängig nur über den Baulog-Verlauf.
     Löscht eine Materialposition (kaskadiert zu verknüpften Dokumenten).
 
     Parameter:
@@ -1219,6 +1226,8 @@ def projekt_uebersicht(projekt_id: int) -> dict:
 def person_bezahlt_markieren(projekt_id: int, person: str, bezahlt: bool = True,
                              bis_datum: str = "") -> dict:
     """
+    SICHERHEIT: Vor dem Buchen Projekt, Person und Betrag zusammenfassen und auf ein klares „Ja“ warten. Vorher mit projekt_uebersicht / guthaben_stand den aktuellen Stand prüfen, damit nichts doppelt gebucht wird. Nach dem Buchen den neuen Stand nennen.
+
     Setzt den Zahlungsstatus ALLER Stunden-Einträge (inkl. Anfahrt) einer Person
     in einem Projekt auf einmal — z. B. „Robert ist bis Freitag ausgezahlt"
     → person_bezahlt_markieren(projekt_id, "Robert", bis_datum="2026-11-06").
@@ -1269,12 +1278,17 @@ def person_bezahlt_markieren(projekt_id: int, person: str, bezahlt: bool = True,
 
 def person_auszahlung(projekt_id: int, person: str, betrag: float) -> dict:
     """
+    SICHERHEIT: Vor dem Buchen Projekt, Person und Betrag zusammenfassen und auf ein klares „Ja“ warten. Vorher mit projekt_uebersicht / guthaben_stand den aktuellen Stand prüfen, damit nichts doppelt gebucht wird. Nach dem Buchen den neuen Stand nennen.
+
     Verbucht eine (Teil-)Auszahlung an eine Person in einem Projekt, z. B.
     „Robert 200 € gegeben“ → person_auszahlung(projekt_id, "Robert", 200).
     Der Betrag wird auf die offenen Stunden-Einträge (inkl. Anfahrt) der Person
     verteilt — älteste Arbeitstage zuerst. Voll gedeckte Tage werden „bezahlt“,
     der letzte ggf. nur teilweise (Restbetrag bleibt offen). Mehrfach aufrufbar;
     Beträge addieren sich. Mehr als offen wird abgelehnt.
+    Für eine PAUSCHALE Auszahlung (z. B. „Robert 500 € gegeben“, evtl. mehr als offen)
+    stattdessen guthaben_einzahlen nutzen – das ist „Abrechnen“ aus der Oberfläche: begleicht
+    älteste Tage zuerst und behält den Rest als Guthaben.
 
     Für EINEN bestimmten Tag stattdessen zeiteintrag_bearbeiten(bereits_gezahlt=…).
 
@@ -1415,6 +1429,7 @@ def dokumente_liste(
 
 def dokument_loeschen(dokument_id: int) -> dict:
     """
+    SICHERHEIT: Nur auf ausdrückliche Anweisung von Sven. Vorher genau nennen, WAS gelöscht wird (Name, Betrag/Datum, Projekt) und auf ein klares „Ja“ warten. Rückgängig nur über den Baulog-Verlauf.
     Löscht ein Dokument aus der Datenbank und entfernt die zugehörige Datei vom Dateisystem.
 
     Parameter:
@@ -1653,6 +1668,8 @@ register_tool("bon_loeschen",          bon_loeschen)
 
 def guthaben_einzahlen(projekt_id: int, person: str, betrag: float, notiz: str = "") -> dict:
     """
+    SICHERHEIT: Vor dem Buchen Projekt, Person und Betrag zusammenfassen und auf ein klares „Ja“ warten. Vorher mit projekt_uebersicht / guthaben_stand den aktuellen Stand prüfen, damit nichts doppelt gebucht wird. Nach dem Buchen den neuen Stand nennen.
+
     Trägt ein Guthaben (Vorauszahlung/Vorstreckung) für eine Person ein, z. B.
     „Koffee hat 500 € vorgestreckt“ → guthaben_einzahlen(projekt_id, "Koffee", 500).
     Das Guthaben wird sofort auf offene Stunden der Person verrechnet (älteste zuerst)
@@ -1684,5 +1701,95 @@ def guthaben_stand(projekt_id: int, person: str) -> dict:
 register_tool("guthaben_einzahlen", guthaben_einzahlen)
 register_tool("guthaben_stand", guthaben_stand)
 
+
+# ---------------------------------------------------------------------------
+# Suche, Fragen, Bericht, Belege/Paperless (Stand 14.11.)
+# ---------------------------------------------------------------------------
+
+def suche(text: str, projekt_id: int = None) -> dict:
+    """
+    Sucht Materialpositionen in allen (oder einem) Projekt(en), z. B. „SH 45“, „Tiefgrund“,
+    „Hornbach“. Liefert Treffer mit Preis, Menge, Datum, Markt, Projekt und Beleg-Nr.,
+    eine Preisübersicht (zuletzt / min / max / Summe) und Volltext-Treffer aus Paperless.
+    Erste Wahl für „Was hat X gekostet?“ / „Wo habe ich X gekauft?“.
+    """
+    q = urllib.parse.urlencode({"q": text, **({"project_id": projekt_id} if projekt_id else {})})
+    return _get(f"/api/suche?{q}")
+
+
+def frage(frage: str, projekt_id: int = None) -> dict:
+    """
+    Stellt eine Frage in normaler Sprache an die Baulog-KI, die ALLE Daten (oder die eines
+    Projekts) mit fertig berechneten Summen kennt, z. B. „Wie viele Stunden hat Robert im
+    November gearbeitet und was ist noch offen?“. Gut für Auswertungen über viele Einträge.
+    Die Antwort kommt von einer KI – bei wichtigen Beträgen mit projekt_uebersicht gegenprüfen.
+    Hinweis: Auszahlungen/Guthaben sind im Status „offen“ SCHON verrechnet – nie doppelt abziehen.
+    """
+    payload = {"frage": frage}
+    if projekt_id:
+        payload["project_id"] = projekt_id
+    return _post("/api/frage", payload)
+
+
+def projekt_bericht(projekt_id: int, mit_fotos: bool = False) -> dict:
+    """
+    Erstellt den Projektbericht als PDF (Kosten, Personen, Stunden, Material mit Beleg-Links,
+    optional mit Fotos/Belegen), legt ihn im Projekt unter „Fotos & Belege“ ab und schickt
+    ihn an Paperless. Dauert bis zu 3 Minuten. Rückgabe: Dateiname und Link zum Abrufen.
+    """
+    wert, err = _ja_nein(mit_fotos, "mit_fotos")
+    if err:
+        return err
+    fotos = "1" if wert else "0"
+    pfad = f"/api/projects/{projekt_id}/bericht.pdf?fotos={fotos}&archiv=1"
+    req = urllib.request.Request(BASE_URL.rstrip("/") + pfad, headers={"X-Baulog-Quelle": "Hermes/MCP"})
+    try:
+        with urllib.request.urlopen(req, timeout=240) as resp:
+            groesse = len(resp.read())
+            name = (resp.headers.get("Content-Disposition") or "").split("filename=")[-1].strip('"')
+    except urllib.error.HTTPError as exc:
+        return _fehler(f"HTTP {exc.code}: Bericht konnte nicht erstellt werden.")
+    except urllib.error.URLError as exc:
+        return _fehler(f"baulog nicht erreichbar: {exc.reason}")
+    return {"status": "ok", "datei": name, "kb": round(groesse / 1024),
+            "abgelegt": "im Projekt unter Fotos & Belege, wird an Paperless gesendet",
+            "link": f"http://192.168.1.134:5112/api/projects/{projekt_id}/bericht.pdf?fotos={fotos}"}
+
+
+def beleg_zu_paperless(bon_id: int) -> dict:
+    """
+    Schickt einen Beleg (Bon/Rechnung, alle Fotos/Seiten als ein PDF) mit OCR, Titel,
+    Projekt-Tags, Markt und Datum an Paperless und wartet auf das Ergebnis.
+    Normalerweise passiert das beim Erfassen automatisch – nur nutzen, wenn ein Beleg fehlt.
+    """
+    return _safe("POST", f"/api/receipts/{bon_id}/paperless?warten=1")
+
+
+def verlauf(limit: int = 20) -> dict:
+    """
+    Zeigt die letzten Änderungen (wer/was/wann, Quelle Web/Hermes) aus dem Änderungsprotokoll.
+    Nützlich, um vor einer Buchung zu prüfen, ob sie schon erfolgt ist.
+    """
+    return _get(f"/api/changelog?limit={int(limit or 20)}")
+
+
+register_tool("suche", suche)
+register_tool("frage", frage)
+register_tool("projekt_bericht", projekt_bericht)
+register_tool("beleg_zu_paperless", beleg_zu_paperless)
+register_tool("verlauf", verlauf)
+
+REGELN = """Baulog (Bautagebuch von Sven): Projekte, Stunden, Material, Belege, Auszahlungen.
+Regeln für sicheres Arbeiten:
+1. Projekt nie raten: bei Unklarheit projekte_liste zeigen und nachfragen. IDs immer aus Listen holen.
+2. Löschen und Geld (person_auszahlung, guthaben_einzahlen, person_bezahlt_markieren, *_loeschen):
+   vorher zusammenfassen (Projekt, Person, Betrag/Datum) und auf ein klares „Ja“ von Sven warten.
+3. Vor jeder Buchung den Stand prüfen (projekt_uebersicht, guthaben_stand, verlauf) – nichts doppelt buchen.
+4. Pauschale Auszahlung („Robert 500 € gegeben“) = guthaben_einzahlen: älteste Tage zuerst, Rest bleibt Guthaben.
+5. „offen“ enthält Auszahlungen/Guthaben bereits – nie noch einmal abziehen.
+6. Fragen zu Preisen/Material: suche; Auswertungen: frage oder projekt_uebersicht. Belege als „Beleg N“ nennen.
+7. Nach jeder Änderung kurz den neuen Stand nennen. Alles steht im Verlauf und ist dort rückgängig zu machen.
+8. Bei Fehlern die Meldung wörtlich weitergeben, nicht raten oder erfinden."""
+
 if __name__ == "__main__":
-    run_server()
+    run_server(instructions=REGELN)
