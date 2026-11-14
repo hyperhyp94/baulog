@@ -137,8 +137,38 @@ def bild_data_uri(pfad: str, max_px: int = 1100) -> str | None:
         return None
 
 
-def html_bericht(d: dict, fotos: bool) -> str:
+def pdf_seiten_uris(pfad: str, max_seiten: int = 4) -> list[str]:
+    import glob
+    import subprocess
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        try:
+            subprocess.run(["pdftoppm", "-r", "110", "-jpeg", "-jpegopt", "quality=78", "-f", "1",
+                            "-l", str(max_seiten), pfad, os.path.join(tmp, "s")],
+                           check=True, capture_output=True, timeout=60)
+        except Exception:
+            return []
+        return ["data:image/jpeg;base64," + base64.b64encode(open(f, "rb").read()).decode()
+                for f in sorted(glob.glob(os.path.join(tmp, "s-*.jpg")))]
+
+
+def html_bericht(d: dict, fotos: bool, basis_url: str = "") -> str:
     p = d["projekt"]
+    docs_je_bon = {}
+    for x in d["docs"]:
+        if x["receipt_id"]:
+            docs_je_bon.setdefault(x["receipt_id"], []).append(x)
+
+    def beleg_link(rid, text=None):
+        b = d["bons"].get(rid)
+        if not b or not b["beleg_nr"]:
+            return ""
+        text = text or f"Beleg {b['beleg_nr']}"
+        if fotos and rid in docs_je_bon:
+            return f'<a class="beleg" href="#beleg-{b["beleg_nr"]}">→ {text}</a>'
+        if basis_url and rid in docs_je_bon:
+            return f'<a class="beleg" href="{basis_url}/api/documents/{docs_je_bon[rid][0]["id"]}/file">→ {text} ↗</a>'
+        return f'<span class="klein">{text}</span>' 
     zeiten, material = d["zeiten"], d["material"]
 
     arbeit = sum(round(z["hours"] * z["hourly_rate"], 2) for z in zeiten)
@@ -185,8 +215,11 @@ def html_bericht(d: dict, fotos: bool) -> str:
   @bottom-right {{ content: "Seite " counter(page) " von " counter(pages); font: 8pt 'DejaVu Sans'; color: {GRAU}; }} }}
 body {{ font-family: 'DejaVu Sans', sans-serif; font-size: 9pt; color: {DUNKEL}; }}
 h1 {{ font-size: 20pt; margin: 0; }} h2 {{ font-size: 12pt; margin: 18px 0 6px; border-bottom: 2px solid {DUNKEL}; padding-bottom: 3px; }}
-.kopf {{ background: {DUNKEL}; color: #fff; padding: 12px 14px; margin-bottom: 12px; }}
-.kopf .sub {{ color: #CFCFCB; margin-top: 4px; }} .kopf .marke {{ font-size: 8pt; letter-spacing: 2px; color: #8ECDB0; }}
+.kopf {{ border-left: 5px solid {GRUEN}; padding: 4px 0 6px 12px; margin-bottom: 14px; }}
+.kopf .sub {{ color: {GRAU}; margin-top: 4px; }} .kopf .marke {{ font-size: 8pt; letter-spacing: 2px; color: {GRUEN}; font-weight: bold; }}
+a {{ color: {GRUEN}; text-decoration: none; }} a.beleg {{ font-size: 7.5pt; font-weight: normal; white-space: nowrap; }}
+.belegkopf {{ background: #F4F4F2; border-left: 4px solid {GRUEN}; padding: 5px 8px; margin: 14px 0 6px; page-break-after: avoid; }}
+.zurueck {{ font-size: 7.5pt; }}
 .kpis {{ display: flex; flex-wrap: wrap; gap: 6px; }}
 .kpi {{ flex: 1 1 22%; border: 1px solid #CFCFCB; padding: 7px 8px; }} .kpi .w {{ font-size: 13pt; font-weight: bold; }}
 .kpi .l {{ color: {GRAU}; font-size: 8pt; }}
@@ -262,37 +295,59 @@ td {{ padding: 3px 4px; border-bottom: 1px solid #ECECE8; vertical-align: top; }
             if rid and rid not in gezeigt and rid in d["bons"]:
                 gezeigt.add(rid)
                 b = d["bons"][rid]
-                teile.append(f'<tr class="bon"><td>{datum(b["purchase_date"])}</td><td colspan="4">{"Beleg " + str(b["beleg_nr"]) + " · " if b["beleg_nr"] else "Bon "}{e(b["store"] or "")}</td>'
+                teile.append(f'<tr class="bon" id="pos-beleg-{b["beleg_nr"]}"><td>{datum(b["purchase_date"])}</td><td colspan="4">{"Beleg " + str(b["beleg_nr"]) + " · " if b["beleg_nr"] else "Bon "}{e(b["store"] or "")} {beleg_link(rid, "ansehen")}</td>'
                              f'<td class="r">{euro(b["total"])}</td><td></td></tr>')
             betrag = round(m["qty"] * m["unit_price"], 2)
             g = gezahlt(betrag, m)
             st = "bezahlt" if m["paid"] else (f"teilw. {euro(g)}" if g > 0 else "offen")
             einzug = "&nbsp;&nbsp;&nbsp;" if rid else ""
             teile.append(f'<tr><td>{"" if rid else datum(m["purchase_date"] or m["created_at"])}</td>'
-                         f'<td>{einzug}{e(m["name"])}{"" if m["billed"] else " <span class=klein>(ohne Rechnung)</span>"}</td>'
+                         f'<td>{einzug}{e(m["name"])}{"" if m["billed"] else " <span class=klein>(ohne Rechnung)</span>"}'
+                         f'{(" " + beleg_link(rid)) if rid else ""}</td>'
                          f'<td>{e(m["task"])}</td><td class="r">{zahl(float(m["qty"]))} {e(m["unit"] or "")}</td>'
                          f'<td class="r">{euro(m["unit_price"])}</td><td class="r">{euro(betrag)}</td>'
                          f'<td class="{"ok" if m["paid"] else "offen"}">{st}</td></tr>')
         teile.append(f'<tr class="summe"><td colspan="5">Summe Material</td><td class="r">{euro(mat)}</td><td></td></tr></table>')
 
     if fotos:
-        bilder = [x for x in d["docs"] if (x["mime"] or "").startswith("image/") and x["stored_path"]
-                  and os.path.exists(x["stored_path"])]
-        pdfs = [x for x in d["docs"] if x["mime"] == "application/pdf"]
-        if bilder:
-            teile.append('<h2 style="page-break-before: always">Fotos &amp; Belege</h2><div class="fotos">')
-            for x in bilder:
-                uri = bild_data_uri(x["stored_path"])
-                if uri:
-                    art = "Beleg" if x["doc_type"] in ("beleg", "rechnung") else "Foto"
-                    if x["receipt_id"] in d["bons"] and d["bons"][x["receipt_id"]]["beleg_nr"]:
-                        art = f'Beleg {d["bons"][x["receipt_id"]]["beleg_nr"]}'
-                    teile.append(f'<div class="foto"><img src="{uri}"><div class="klein">{art} · '
-                                 f'{datum(x["created_at"])} · {e(x["filename"])}</div></div>')
+        def bild_html(uri, unter):
+            return f'<div class="foto"><img src="{uri}"><div class="klein">{unter}</div></div>'
+
+        def doc_bilder(x):
+            """Bild-URIs einer Datei: Foto direkt, PDF als Seitenbilder (max. 4 Seiten)."""
+            if not x["stored_path"] or not os.path.exists(x["stored_path"]):
+                return []
+            if (x["mime"] or "").startswith("image/"):
+                u = bild_data_uri(x["stored_path"])
+                return [u] if u else []
+            if x["mime"] == "application/pdf":
+                return pdf_seiten_uris(x["stored_path"], 4)
+            return []
+
+        bons_mit_datei = sorted((r for r in d["bons"].values() if r["id"] in docs_je_bon),
+                                key=lambda r: (r["beleg_nr"] or 9999, r["id"]))
+        if bons_mit_datei:
+            teile.append('<h2 style="page-break-before: always">Belege</h2>')
+            for r in bons_mit_datei:
+                nr = r["beleg_nr"]
+                teile.append(f'<div class="belegkopf" id="beleg-{nr}"><b>Beleg {nr}</b> · {e(r["store"])} · '
+                             f'{datum(r["purchase_date"])} · <b>{euro(r["total"])}</b> '
+                             f'<a class="zurueck" href="#pos-beleg-{nr}">↑ zu den Positionen</a></div><div class="fotos">')
+                for x in docs_je_bon[r["id"]]:
+                    uris = doc_bilder(x)
+                    for i, u in enumerate(uris, 1):
+                        seite = f" · Seite {i}" if len(uris) > 1 and x["mime"] == "application/pdf" else ""
+                        teile.append(bild_html(u, f'{e(x["filename"])}{seite}'))
+                teile.append("</div>")
+
+        rest = [x for x in d["docs"] if not x["receipt_id"]]
+        rest_bilder = [(x, u) for x in rest for u in doc_bilder(x)]
+        if rest_bilder:
+            teile.append('<h2 style="page-break-before: always">Fotos &amp; weitere Dokumente</h2><div class="fotos">')
+            for x, u in rest_bilder:
+                art = {"beleg": "Beleg", "rechnung": "Rechnung"}.get(x["doc_type"], "Foto")
+                teile.append(bild_html(u, f'{art} · {datum(x["created_at"])} · {e(x["filename"])}'))
             teile.append("</div>")
-        if pdfs:
-            teile.append('<h2>PDF-Dokumente</h2><table>' + "".join(
-                f'<tr><td>{datum(x["created_at"])}</td><td>{e(x["filename"])}</td></tr>' for x in pdfs) + "</table>")
 
     teile.append("</body></html>")
     return "".join(teile)
@@ -300,8 +355,9 @@ td {{ padding: 3px 4px; border-bottom: 1px solid #ECECE8; vertical-align: top; }
 
 def main():
     pid, fotos, ziel = int(sys.argv[1]), sys.argv[2] == "1", sys.argv[3]
+    basis_url = sys.argv[4].rstrip("/") if len(sys.argv) > 4 else ""
     from weasyprint import HTML
-    HTML(string=html_bericht(daten(pid), fotos), base_url=BASIS).write_pdf(ziel)
+    HTML(string=html_bericht(daten(pid), fotos, basis_url), base_url=BASIS).write_pdf(ziel)
 
 
 if __name__ == "__main__":

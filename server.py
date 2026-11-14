@@ -2025,7 +2025,7 @@ def api_projekt_bericht(pid: int):
         try:
             r = subprocess.run(
                 ["/usr/bin/python3", os.path.join(os.path.dirname(os.path.abspath(__file__)), "bericht.py"),
-                 str(pid), fotos, ziel], capture_output=True, text=True, timeout=180)
+                 str(pid), fotos, ziel, request.host_url], capture_output=True, text=True, timeout=180)
         except (OSError, subprocess.SubprocessError) as exc:
             return _err(f"Bericht konnte nicht erstellt werden: {exc}", 500)
         if r.returncode != 0 or not os.path.exists(ziel):
