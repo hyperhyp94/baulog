@@ -8,6 +8,7 @@ erzwungen und hier zusätzlich validiert/normalisiert.
 """
 
 import base64
+import re
 import json
 import math
 import os
@@ -79,6 +80,7 @@ Erfasse jede gekaufte Artikelzeile als Position mit den Preisen GENAU WIE GEDRUC
 - Rabatte in derselben Form (netto/brutto) wie die Positionen angeben.
 - Mengenzeilen wie "3 x 4,99" gehören zur Artikelzeile: menge=3, einzelpreis=4.99.
 - Gewichts-/Längenangaben (z. B. "2,5 m x 3,20") als menge mit passender einheit.
+- name = nur die Artikelbezeichnung: Artikel-/EAN-Nummern, Barcodes und Lagercodes weglassen.
 - Pfand gehört als eigene Position dazu.
 - Rabatte/Gutscheine/Coupons NICHT als Position, sondern unter rabatte mit negativem betrag.
 - Zwischensummen, MwSt-Aufstellungen, Zahlungsart, Rückgeld ignorieren.
@@ -225,6 +227,15 @@ def pdf_zu_bildern(data: bytes, max_seiten: int = MAX_IMAGES) -> list[tuple[byte
         return [(open(f, "rb").read(), "image/jpeg") for f in seiten]
 
 
+_NUMMER_VORN = re.compile(r"^\s*(?:(?:Art\.?-?\s*Nr\.?|EAN|Artikel(?:nummer|nr\.?))\s*:?\s*)?[0-9][0-9 .\-/]{4,}[0-9]\s+")
+
+
+def artikelname(name: str) -> str:
+    """Entfernt vorangestellte Artikel-/EAN-Nummern (z. B. '4011821332733 Tapetenlöser')."""
+    neu = _NUMMER_VORN.sub("", name.strip()).strip()
+    return neu or name.strip()
+
+
 def _num(val, default=0.0) -> float:
     if isinstance(val, bool):
         return default
@@ -243,7 +254,7 @@ def normalize(raw: dict) -> dict:
     for p in raw.get("positionen") or []:
         if not isinstance(p, dict):
             continue
-        name = str(p.get("name") or "").strip()[:500]
+        name = artikelname(str(p.get("name") or ""))[:500]
         if not name:
             continue
         menge = _num(p.get("menge"), 1.0)
