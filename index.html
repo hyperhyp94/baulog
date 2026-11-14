@@ -1175,11 +1175,29 @@ function htmlAbrechnen() {
       <tr><th>Person</th><th class="r">offen</th><th class="r">offen €</th><th class="r">Guthaben</th><th></th></tr>
       ${zeilen}
     </table></div>
-    ${einz.length ? `<h2>Bisherige Auszahlungen</h2><div class="scrollx"><table>
-      <tr><th>Datum</th><th>Person</th><th class="r">Betrag</th><th>Notiz</th></tr>
-      ${einz.map(x => `<tr><td>${datumKurz(lokalesDatum(x.created_at))}</td><td>${esc(x.person)}</td>
-        <td class="r">${euro(x.betrag)}</td><td>${esc(x.notiz || '')}</td></tr>`).join('')}
-    </table></div>` : ''}`;
+    ${einz.length ? `<h2>Bisherige Auszahlungen</h2>
+      <p class="hinweis" style="margin-top:0">Antippen zeigt, welche Arbeitstage damit bezahlt wurden.</p>
+      ${einz.map(x => `<details class="box" style="padding:10px 12px">
+        <summary style="cursor:pointer; display:flex; gap:8px; flex-wrap:wrap; align-items:baseline">
+          <b>${datumKurz(lokalesDatum(x.created_at))}</b> · ${esc(x.person)} · <b>${euro(x.betrag)}</b>
+          <span class="muted">${esc(x.notiz || '')}</span></summary>
+        ${abrVerrechnetHtml(x)}</details>`).join('')}` : ''}`;
+}
+
+// Aufschlüsselung einer Auszahlung: welche Tage (Stunden) damit bezahlt wurden
+function abrVerrechnetHtml(x) {
+  const v = x.verrechnet || [];
+  const std = r2(v.reduce((a, t) => a + t.hours * Math.min(1, t.betrag / (t.tagesbetrag || 1)), 0));
+  return `<div class="scrollx" style="margin-top:8px"><table>
+      <tr><th>Arbeitstag</th><th class="r">Std.</th><th class="r">Tag gesamt</th><th class="r">davon bezahlt</th><th></th></tr>
+      ${v.map(t => `<tr><td>${datumKurz(t.work_date)}</td><td class="r">${zahl(t.hours)}</td>
+        <td class="r">${euro(t.tagesbetrag)}</td><td class="r"><b>${euro(t.betrag)}</b></td>
+        <td>${t.betrag >= t.tagesbetrag - 0.004 ? '✓ ganz' : 'teilweise'}</td></tr>`).join('')
+        || '<tr><td colspan="5" class="muted">Noch nichts verrechnet.</td></tr>'}
+      <tr class="summenzeile"><td>Verrechnet</td><td class="r">${zahl(std)}</td><td></td>
+        <td class="r">${euro(r2(x.betrag - (x.rest || 0)))}</td><td></td></tr>
+    </table></div>
+    ${x.rest > 0.004 ? `<p class="hinweis" style="color:var(--green)">Noch nicht verrechnet (Guthaben): <b>${euro(x.rest)}</b></p>` : ''}`;
 }
 
 function formAbrechnen(person) {
@@ -1225,11 +1243,17 @@ function formAbrechnen(person) {
     if (!(v > 0)) throw new Error('Bitte einen Betrag über 0 eintragen.');
     const res = await api('POST', `/api/projects/${P.pid}/guthaben`,
       { person, amount: v, notiz: $('#abr-notiz').value.trim() || 'Auszahlung' });
-    closeModal();
-    showToast(`${euro(v)} an ${person}: ${euro(res.verrechnet)} mit Stunden verrechnet`
-      + (res.saldo > 0.004 ? `, Guthaben jetzt ${euro(res.saldo)}` : ''), 'success');
     P.tab = 'abrechnen';
     await neuLaden();
+    // Ergebnis zeigen: was genau abgerechnet wurde
+    const p = abrPersonen().find(x => x.name === person) || { offen: 0 };
+    openModal(`${modalKopf('Auszahlung gebucht')}
+      <div class="modal-body">
+        <p><b>${euro(v)}</b> an <b>${esc(person)}</b> – damit wurden diese Arbeitstage bezahlt (älteste zuerst):</p>
+        ${res.auszahlung ? abrVerrechnetHtml(res.auszahlung) : ''}
+        <p>Danach noch offen: <b>${euro(p.offen)}</b>${res.saldo > 0.004 ? ` · Guthaben: <b>${euro(res.saldo)}</b>` : ''}</p>
+      </div>
+      <div class="modal-fuss"><span class="spacer"></span><button onclick="closeModal()">OK</button></div>`);
   });
 }
 

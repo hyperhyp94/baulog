@@ -1094,7 +1094,21 @@ def guthaben_saldo(project_id: int, person: str) -> dict:
             "WHERE project_id = ? AND lower(person) = lower(?) ORDER BY created_at, id",
             (project_id, person.strip()),
         ).fetchall()
-        return {"saldo": saldo, "einzahlungen": [dict(p) for p in posten]}
+        einzahlungen = []
+        for p in posten:
+            e = dict(p)
+            # Welche Arbeitstage wurden mit dieser Auszahlung bezahlt (für die Nachvollziehbarkeit)
+            e["verrechnet"] = [dict(v) for v in conn.execute(
+                "SELECT v.betrag, v.created_at AS verrechnet_am, te.id AS time_entry_id, "
+                "COALESCE(te.work_date, substr(te.created_at, 1, 10)) AS work_date, te.hours, "
+                "ROUND(te.hours * te.hourly_rate + COALESCE(te.travel_cost, 0), 2) AS tagesbetrag, te.paid "
+                "FROM guthaben_verbrauch v JOIN time_entries te ON te.id = v.time_entry_id "
+                "WHERE v.guthaben_id = ? ORDER BY COALESCE(te.work_date, substr(te.created_at, 1, 10)), te.id",
+                (p["id"],),
+            ).fetchall()]
+            e["rest"] = round(e["betrag"] - sum(v["betrag"] for v in e["verrechnet"]), 2)
+            einzahlungen.append(e)
+        return {"saldo": saldo, "einzahlungen": einzahlungen}
     finally:
         conn.close()
 

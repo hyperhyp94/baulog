@@ -1089,6 +1089,9 @@ def api_guthaben_create(pid: int):
         return err
     notiz = data.get("notiz") or None
     res = db.guthaben_einzahlen(pid, person, amount, notiz)
+    # Aufschlüsselung der gerade gebuchten Auszahlung mitliefern
+    einz = db.guthaben_saldo(pid, person)["einzahlungen"]
+    res["auszahlung"] = einz[-1] if einz else None
     return _ok(**res), 201
 
 
