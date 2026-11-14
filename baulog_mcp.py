@@ -698,15 +698,64 @@ def aufgabe_loeschen(aufgabe_id: int) -> dict:
 # 5. Zeiterfassung (Personalkosten)
 # ---------------------------------------------------------------------------
 
+
+# ---------------------------------------------------------------------------
+# Harte Prüfungen für Stunden und Material (Doppelt, Datum, Plausibilität)
+# ---------------------------------------------------------------------------
+
+MAX_STUNDEN_TAG = 14
+MAX_TAGE_ZURUECK = 60
+
+
+def _aufgabe_kontext(aufgabe_id: int) -> tuple[dict | None, dict | None]:
+    """Aufgabe + Baustelle + Projekt (Name) holen – prüft zugleich, dass die Aufgabe existiert."""
+    t = _get(f"/api/tasks/{aufgabe_id}")
+    if not _ok_antwort(t) or "task" not in t:
+        return None, _fehler(f"Aufgabe {aufgabe_id} gibt es nicht – ID aus aufgaben_liste/projekt_uebersicht holen.")
+    site = (_get(f"/api/sites/{t['task']['site_id']}") or {}).get("site") or {}
+    proj = {}
+    if site.get("project_id"):
+        proj = (_get(f"/api/projects/{site['project_id']}") or {}).get("project") or {}
+    return {"aufgabe": t["task"]["title"], "aufgabe_id": aufgabe_id, "baustelle": site.get("name"),
+            "site_id": site.get("id"), "projekt": proj.get("name"), "projekt_id": site.get("project_id"),
+            "_task": t}, None
+
+
+def _datum_pruefen(work_date: str | None, bestaetigt: int) -> dict | None:
+    """Kein Datum in der Zukunft, nicht älter als MAX_TAGE_ZURUECK – außer bestaetigt."""
+    if not work_date or bestaetigt:
+        return None
+    try:
+        tag = date.fromisoformat(work_date[:10])
+    except ValueError:
+        return None
+    if tag > date.today():
+        return _fehler(f"Datum {tag.strftime('%d.%m.%Y')} liegt in der Zukunft. Bei Sven nachfragen; "
+                       "falls wirklich gewollt, mit bestaetigt=True erneut aufrufen.")
+    if (date.today() - tag).days > MAX_TAGE_ZURUECK:
+        return _fehler(f"Datum {tag.strftime('%d.%m.%Y')} ist über {MAX_TAGE_ZURUECK} Tage alt. Bei Sven "
+                       "nachfragen; falls richtig, mit bestaetigt=True erneut aufrufen.")
+    return None
+
+
 def zeiteintrag_anlegen(aufgabe_id: int, person: str, stunden: float,
                         datum: str = "", stundensatz: float = None,
                         anfahrt: float = 0.0, mit_rechnung: bool = True,
-                        bezahlt: bool = False, bereits_gezahlt: float = None) -> dict:
+                        bezahlt: bool = False, bereits_gezahlt: float = None,
+                        zusaetzlich: bool = False, bestaetigt: bool = False) -> dict:
     """
     Erfasst einen Arbeitstag einer Person: Stunden (+ optional Anfahrt) auf einer Aufgabe.
     Kosten = Stunden × Stundensatz + Anfahrt. Ein Eintrag je Person und Tag.
 
-    Vorher mit projekt_uebersicht prüfen, ob der Tag schon erfasst ist (nicht doppelt anlegen).
+    FESTE PRÜFUNGEN (im Code, nicht umgehbar ohne Flag):
+      * datum ist Pflicht – nie raten; fehlt der Tag, Sven fragen („heute“ ist erlaubt).
+      * Hat die Person an dem Tag im Projekt schon einen Eintrag → Ablehnung mit dem
+        vorhandenen Eintrag. Meist ist dann zeiteintrag_bearbeiten richtig. Nur wenn
+        Sven ausdrücklich einen ZWEITEN Eintrag will: zusaetzlich=True.
+      * Mehr als 14 Stunden, Datum in der Zukunft oder älter als 60 Tage → Ablehnung;
+        nach Rückfrage bei Sven mit bestaetigt=True erneut aufrufen.
+    Die Antwort enthält „gebucht“ (Projekt, Aufgabe, Person, Datum, Stunden, Betrag) –
+    das Sven genau so bestätigen.
 
     :param aufgabe_id: ID der Aufgabe (aus aufgaben_liste oder projekt_uebersicht).
     :param person: Name der Person — muss in den Stammdaten existieren
@@ -725,7 +774,29 @@ def zeiteintrag_anlegen(aufgabe_id: int, person: str, stunden: float,
                     mit_rechnung und bezahlt sind unabhängig voneinander.
     :param bereits_gezahlt: Teilzahlung in Euro (z. B. 50), Rest bleibt offen. Nur bei
                     bezahlt=False; ab dem vollen Betrag gilt der Eintrag als bezahlt.
+    :param zusaetzlich: True = bewusst zweiter Eintrag derselben Person am selben Tag.
+    :param bestaetigt: True = Sven hat ungewöhnliche Werte (>14 h, Datum) bestätigt.
     """
+    if not str(datum or "").strip():
+        return _fehler("Datum fehlt. Sven fragen, für welchen Tag die Stunden sind ('heute' ist erlaubt).")
+    extra, err = _ja_nein(zusaetzlich, "zusaetzlich")
+    if err:
+        return err
+    best, err = _ja_nein(bestaetigt, "bestaetigt")
+    if err:
+        return err
+    try:
+        stunden = float(stunden)
+    except (TypeError, ValueError):
+        return _fehler(f"'stunden' muss eine Zahl sein, nicht {stunden!r}.")
+    if stunden <= 0:
+        return _fehler("'stunden' muss größer als 0 sein.")
+    if stunden > MAX_STUNDEN_TAG and not best:
+        return _fehler(f"{stunden:g} Stunden an einem Tag sind unplausibel (max. {MAX_STUNDEN_TAG}). "
+                       "Bei Sven nachfragen (Tippfehler? z. B. 6,5 statt 65); falls richtig, bestaetigt=True.")
+    kontext, err = _aufgabe_kontext(aufgabe_id)
+    if err:
+        return err
     p, err = _resolve_person(person)
     if err:
         return err
@@ -738,6 +809,20 @@ def zeiteintrag_anlegen(aufgabe_id: int, person: str, stunden: float,
     work_date, err = _datum(datum)
     if err:
         return err
+    err = _datum_pruefen(work_date, best)
+    if err:
+        return err
+    if not extra and kontext.get("site_id"):
+        tasks = (_get(f"/api/sites/{kontext['site_id']}/tasks") or {}).get("tasks") or []
+        for t in tasks:
+            te = (_get(f"/api/tasks/{t['id']}") or {}).get("time_entries") or []
+            for e in te:
+                if (e.get("work_date") or "")[:10] == work_date and (e.get("person") or "").lower() == p["name"].lower():
+                    return _fehler(
+                        f"{p['name']} hat am {date.fromisoformat(work_date).strftime('%d.%m.%Y')} schon einen Eintrag "
+                        f"(id {e['id']}, Aufgabe „{t['title']}“, {e['hours']:g} h, {e.get('kosten', 0):.2f} €). "
+                        "Nicht doppelt anlegen: ggf. zeiteintrag_bearbeiten nutzen. Nur wenn Sven ausdrücklich "
+                        "einen zweiten Eintrag will: zusaetzlich=True.")
     payload = {"person_id": p["id"], "hours": stunden, "billed": billed, "paid": paid}
     if bereits_gezahlt:
         payload["paid_amount"] = bereits_gezahlt
@@ -747,7 +832,15 @@ def zeiteintrag_anlegen(aufgabe_id: int, person: str, stunden: float,
         payload["work_date"] = work_date
     if anfahrt:
         payload["travel_cost"] = anfahrt
-    return _post(f"/api/tasks/{aufgabe_id}/timeentries", payload)
+    res = _post(f"/api/tasks/{aufgabe_id}/timeentries", payload)
+    if _ok_antwort(res):
+        satz = stundensatz if stundensatz is not None else p.get("hourly_rate") or 0
+        res["gebucht"] = {"projekt": kontext["projekt"], "aufgabe": kontext["aufgabe"], "person": p["name"],
+                          "datum": date.fromisoformat(work_date).strftime("%d.%m.%Y"), "stunden": stunden,
+                          "stundensatz": satz, "anfahrt": anfahrt or 0,
+                          "betrag": _r2(stunden * float(satz) + float(anfahrt or 0)),
+                          "mit_rechnung": bool(billed), "bezahlt": bool(paid)}
+    return res
 
 
 def zeiteintraege_liste(aufgabe_id: int) -> dict:
@@ -784,6 +877,13 @@ def zeiteintrag_bearbeiten(zeiteintrag_id: int, person: str = None,
                     Betrag gilt der Eintrag als bezahlt. Nicht zusammen mit bezahlt.
                     Für Beträge über mehrere Tage: person_auszahlung.
     """
+    if stunden is not None:
+        try:
+            if float(stunden) > MAX_STUNDEN_TAG:
+                return _fehler(f"{stunden} Stunden an einem Tag sind unplausibel (max. {MAX_STUNDEN_TAG}) – "
+                               "bei Sven nachfragen.")
+        except (TypeError, ValueError):
+            return _fehler(f"'stunden' muss eine Zahl sein, nicht {stunden!r}.")
     payload = {}
     if bereits_gezahlt is not None:
         if bezahlt is not None:
@@ -909,6 +1009,7 @@ def material_anlegen(
     bereits_gezahlt: float = None,
     markt: str = None,
     kaufdatum: str = None,
+    zusaetzlich: bool = False,
 ) -> dict:
     """
     Legt eine Materialposition / Ausgabe zu einer Aufgabe an (Einkauf, Miete, Entsorgung …).
@@ -928,9 +1029,20 @@ def material_anlegen(
         bezahlt      — True = schon bezahlt, False = noch offen (Standard).
         markt        — Optional: Händler/Markt (z. B. „Hornbach").
         kaufdatum    — Optional: Kaufdatum (TT.MM.JJJJ oder YYYY-MM-DD).
+        zusaetzlich  — True = gleiche Position bewusst noch einmal anlegen.
 
-    Rückgabe: {"status": "ok", "id": <material_id>}
+    FESTE PRÜFUNG: Gibt es in der Aufgabe schon eine Position mit gleicher Bezeichnung,
+    gleichem Einzelpreis und gleichem Kaufdatum, wird abgelehnt (doppelt?). Nur wenn Sven
+    ausdrücklich bestätigt: zusaetzlich=True. Die Antwort enthält „gebucht“ – so bestätigen.
+
+    Rückgabe: {"status": "ok", "id": <material_id>, "gebucht": {...}}
     """
+    kontext, err = _aufgabe_kontext(aufgabe_id)
+    if err:
+        return err
+    extra, err = _ja_nein(zusaetzlich, "zusaetzlich")
+    if err:
+        return err
     billed, err = _ja_nein(mit_rechnung, "mit_rechnung")
     if err:
         return err
@@ -940,6 +1052,14 @@ def material_anlegen(
     kdatum, err = _datum(kaufdatum)
     if err:
         return err
+    if not extra:
+        norm = lambda x: re.sub(r"[^0-9a-zäöüß]+", "", (x or "").lower())
+        for m in kontext["_task"].get("materials") or []:
+            if (norm(m.get("name")) == norm(bezeichnung)
+                    and abs(float(m.get("unit_price") or 0) - float(einzelpreis or 0)) < 0.005
+                    and (m.get("purchase_date") or "")[:10] == (kdatum or "")):
+                return _fehler(f"„{m['name']}“ zu {float(m['unit_price']):.2f} € gibt es in dieser Aufgabe schon "
+                               f"(id {m['id']}). Doppelt? Nur wenn Sven es ausdrücklich will: zusaetzlich=True.")
     payload: dict = {
         "name": bezeichnung,
         "qty": menge,
@@ -954,7 +1074,13 @@ def material_anlegen(
         payload["store"] = markt
     if kdatum:
         payload["purchase_date"] = kdatum
-    return _post(f"/api/tasks/{aufgabe_id}/materials", payload)
+    res = _post(f"/api/tasks/{aufgabe_id}/materials", payload)
+    if _ok_antwort(res):
+        res["gebucht"] = {"projekt": kontext["projekt"], "aufgabe": kontext["aufgabe"], "was": bezeichnung,
+                          "menge": menge, "einheit": einheit, "einzelpreis": einzelpreis,
+                          "betrag": _r2(float(menge) * float(einzelpreis)), "markt": markt,
+                          "kaufdatum": kdatum, "mit_rechnung": bool(billed), "bezahlt": bool(paid)}
+    return res
 
 
 def materialien_liste(aufgabe_id: int) -> dict:
