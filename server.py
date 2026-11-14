@@ -1650,7 +1650,8 @@ def _paperless_meta(doc) -> dict:
     if receipt:
         euro = f"{receipt['total']:.2f}".replace(".", ",")
         y, m, d = receipt["purchase_date"].split("-")
-        meta["title"] = f"{receipt['store']}, {d}.{m}.{y}, {euro} €"
+        nr = f"Beleg {receipt['beleg_nr']} · " if receipt["beleg_nr"] else ""
+        meta["title"] = f"{project['name'] + ' · ' if project else ''}{nr}{receipt['store']}, {d}.{m}.{y}, {euro} €"
         meta["created"] = receipt["purchase_date"]
         meta["store"] = receipt["store"]
         meta["doc_type_name"] = "Kassenbon"
@@ -1670,6 +1671,160 @@ def _paperless_meta(doc) -> dict:
     # Duplikate entfernen, Reihenfolge behalten
     meta["tags"] = list(dict.fromkeys(t for t in meta["tags"] if t))
     return meta
+
+
+class PaperlessFehler(Exception):
+    pass
+
+
+def _paperless_hochladen(pfad: str, dateiname: str, mime: str, meta: dict, anlegen: bool) -> tuple[int, str]:
+    """Lädt eine Datei mit Metadaten hoch, wartet auf die Verarbeitung (OCR) und gibt (id, url) zurück."""
+    paperless_url, paperless_token = _load_paperless_config()
+    if not paperless_url or not paperless_token:
+        raise PaperlessFehler("Paperless ist nicht konfiguriert.")
+    headers = {"Authorization": f"Token {paperless_token}"}
+    form: list[tuple[str, str]] = [("title", meta["title"])]
+    if meta["created"]:
+        form.append(("created", meta["created"]))
+    wanted = []
+    if meta["store"]:
+        wanted.append(("correspondents", meta["store"], "correspondent", {}))
+    if meta["doc_type_name"]:
+        wanted.append(("document_types", meta["doc_type_name"], "document_type", {"matching_algorithm": 0}))
+    for tag in meta["tags"]:
+        wanted.append(("tags", tag, "tags", {"matching_algorithm": 0}))
+    try:
+        for endpoint, name, field, create_body in wanted:
+            found, _ = _pl_lookup(paperless_url, headers, endpoint, name, create_body if anlegen else None)
+            if found is not None:
+                form.append((field, str(found)))
+        with open(pfad, "rb") as fh:
+            resp = requests.post(f"{paperless_url}/api/documents/post_document/", headers=headers,
+                                 files={"document": (dateiname, fh, mime)}, data=form, timeout=60)
+        if resp.status_code not in (200, 201, 202):
+            raise PaperlessFehler(f"Upload fehlgeschlagen: HTTP {resp.status_code} {resp.text[:200]}")
+        try:
+            task_id = resp.json()
+        except ValueError:
+            task_id = resp.text.strip().strip('"')
+    except requests.RequestException as exc:
+        raise PaperlessFehler(f"Verbindung zu Paperless fehlgeschlagen: {exc}")
+    for _ in range(90):  # OCR kann bei mehrseitigen Belegen dauern: max. 3 Minuten
+        time.sleep(2)
+        try:
+            poll = requests.get(f"{paperless_url}/api/tasks/", headers=headers,
+                                params={"task_id": task_id}, timeout=10)
+            if poll.status_code != 200:
+                continue
+            data = poll.json()
+            for entry in (data if isinstance(data, list) else [data]):
+                if isinstance(entry, dict) and entry.get("task_id") == task_id:
+                    if entry.get("status") == "SUCCESS" and entry.get("related_document"):
+                        pid = int(entry["related_document"])
+                        tag_ids = [int(v) for k, v in form if k == "tags"]
+                        _paperless_nachziehen(pid, meta["title"], tag_ids)
+                        return pid, f"{paperless_url}/documents/{pid}"
+                    if entry.get("status") in ("FAILURE", "REVOKED"):
+                        raise PaperlessFehler(f"Paperless: {(entry.get('result') or '')[:200]}")
+        except requests.RequestException:
+            continue
+    raise PaperlessFehler("Paperless hat nicht rechtzeitig geantwortet.")
+
+
+def _paperless_nachziehen(pid: int, titel: str, tag_ids: list[int]) -> None:
+    """
+    Die KI-Nachverarbeitung in Paperless (post-consume) überschreibt Titel und Tags.
+    Danach Baulog-Titel wiederherstellen und Baulog-Tags ergänzen (KI-Tags bleiben).
+    Läuft im Hintergrund: Prüfung nach 30 s, 90 s und 180 s.
+    """
+    import threading
+    paperless_url, paperless_token = _load_paperless_config()
+    headers = {"Authorization": f"Token {paperless_token}"}
+
+    def lauf():
+        for warte in (30, 60, 90):
+            time.sleep(warte)
+            try:
+                doc = requests.get(f"{paperless_url}/api/documents/{pid}/", headers=headers, timeout=15).json()
+                tags = list(dict.fromkeys((doc.get("tags") or []) + tag_ids))
+                if doc.get("title") != titel or set(tag_ids) - set(doc.get("tags") or []):
+                    requests.patch(f"{paperless_url}/api/documents/{pid}/", headers=headers,
+                                   json={"title": titel, "tags": tags}, timeout=15)
+            except (requests.RequestException, ValueError) as exc:
+                app.logger.warning("Paperless-Nachziehen %s: %s", pid, exc)
+    threading.Thread(target=lauf, daemon=True).start()
+
+
+def paperless_beleg_senden(rid: int) -> dict:
+    """
+    Schickt einen Beleg (alle Fotos zu EINEM PDF zusammengefasst, bzw. die PDF-Rechnung)
+    mit Projekt, Beleg-Nummer, Markt, Datum und Betrag an Paperless. Paperless macht die OCR.
+    Fehlende Tags/Korrespondenten werden angelegt.
+    """
+    import subprocess
+    import tempfile
+    conn = db.get_conn()
+    try:
+        docs = conn.execute("SELECT * FROM documents WHERE receipt_id = ? ORDER BY created_at, id", (rid,)).fetchall()
+    finally:
+        conn.close()
+    docs = [x for x in docs if x["stored_path"] and os.path.exists(x["stored_path"])]
+    if not docs:
+        raise PaperlessFehler("Zu diesem Beleg gibt es keine Datei.")
+    if all(x["paperless_id"] for x in docs):
+        return {"paperless_id": docs[0]["paperless_id"], "paperless_url": docs[0]["paperless_url"], "schon_da": True}
+    meta = _paperless_meta(docs[0])
+    bilder = [x for x in docs if (x["mime"] or "").startswith("image/")]
+    pdfs = [x for x in docs if x["mime"] == "application/pdf"]
+    ergebnisse = []
+    with tempfile.TemporaryDirectory() as tmp:
+        pakete = []
+        if bilder:
+            ziel = os.path.join(tmp, "beleg.pdf")
+            r = subprocess.run(["/usr/bin/python3", os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                "bilder_zu_pdf.py"), ziel, *[x["stored_path"] for x in bilder]],
+                               capture_output=True, text=True, timeout=120)
+            if r.returncode != 0 or not os.path.exists(ziel):
+                raise PaperlessFehler("Fotos konnten nicht zu einem PDF zusammengefügt werden.")
+            pakete.append((ziel, f"{meta['title']}.pdf".replace("/", "-"), "application/pdf", bilder))
+        for x in pdfs:
+            pakete.append((x["stored_path"], x["filename"], "application/pdf", [x]))
+        for pfad, name, mime, zugehoerig in pakete:
+            if all(z["paperless_id"] for z in zugehoerig):
+                continue
+            pid, url = _paperless_hochladen(pfad, name, mime, meta, anlegen=True)
+            for z in zugehoerig:
+                db.update_document(z["id"], {"paperless_id": pid, "paperless_url": url})
+            ergebnisse.append({"paperless_id": pid, "paperless_url": url})
+    return {"gesendet": ergebnisse, "titel": meta["title"], "tags": meta["tags"]}
+
+
+def _paperless_im_hintergrund(rid: int) -> None:
+    import threading
+
+    def lauf():
+        try:
+            erg = paperless_beleg_senden(rid)
+            app.logger.info("Paperless: Beleg %s gesendet: %s", rid, erg)
+        except Exception as exc:  # nie den Server stören
+            app.logger.warning("Paperless: Beleg %s nicht gesendet: %s", rid, exc)
+    threading.Thread(target=lauf, daemon=True).start()
+
+
+@app.route("/api/receipts/<int:rid>/paperless", methods=["POST"])
+def api_receipt_paperless(rid: int):
+    """Beleg an Paperless senden. ?warten=1 wartet auf das Ergebnis, sonst im Hintergrund."""
+    if not db.get_receipt(rid):
+        return _err("Beleg nicht gefunden.", 404)
+    if not _paperless_enabled():
+        return _err("Paperless ist nicht konfiguriert.", 400)
+    if request.args.get("warten") == "1":
+        try:
+            return _ok(**paperless_beleg_senden(rid))
+        except PaperlessFehler as exc:
+            return _err(str(exc), 502)
+    _paperless_im_hintergrund(rid)
+    return _ok(gestartet=True), 202
 
 
 @app.route("/api/documents/<int:doc_id>/paperless", methods=["POST"])

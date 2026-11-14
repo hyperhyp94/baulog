@@ -1901,8 +1901,11 @@ Trotzdem ${euro(ziel)} buchen?`);
         if (!res.ok) fehler.push(`Foto ${i + 1}: Fehler ${res.status}`);
       } catch (e) { fehler.push(`Foto ${i + 1}: ${e.message}`); }
     }
+    // Beleg automatisch in Paperless archivieren (OCR + Projekt-Infos), läuft im Hintergrund
+    if (App.paperless && Bon.fotos.length) api('POST', `/api/receipts/${r.id}/paperless`).catch(() => {});
     closeModal();
-    showToast(`Bon gebucht: ${pos.length} ${pos.length === 1 ? 'Position' : 'Positionen'}, ${euro(total)}`, 'success');
+    showToast(`Beleg ${r.beleg_nr || ''} gebucht: ${pos.length} ${pos.length === 1 ? 'Position' : 'Positionen'}, ${euro(total)}`
+      + (App.paperless && Bon.fotos.length ? ' – wird in Paperless archiviert' : ''), 'success');
     fehler.forEach(m => showError('Bon gebucht, aber ' + m));
     Bon.fotos.forEach(f => URL.revokeObjectURL(f.url)); Bon.fotos = [];
     if (Bon.eingang) { api('DELETE', '/api/eingang/' + Bon.eingang).catch(() => {}); Bon.eingang = null; }
