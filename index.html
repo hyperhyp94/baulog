@@ -2232,7 +2232,7 @@ function belegZeigen(url) {
     platz.style.flexDirection = 'column'; platz.style.alignItems = 'center'; platz.style.justifyContent = 'flex-start';
     platz.innerHTML = Array.from({ length: n }, (_, i) =>
       `<div style="color:#aaa;font-size:13px;margin:10px 0 4px">Seite ${i + 1} von ${n}</div>
-       <img src="/api/documents/${m[1]}/seite/${i + 1}" loading="lazy" style="max-width:100%;height:auto;display:block;background:#fff" alt="Seite ${i + 1}">`).join('');
+       <img src="/api/documents/${m[1]}/seite/${i + 1}" style="width:100%;max-width:1000px;height:auto;display:block;background:#fff" alt="Seite ${i + 1}">`).join('');
   };
   o.querySelector('#beleg-zu').onclick = () => { if (history.state && history.state.beleg) history.back(); else zu(); };
   document.body.appendChild(o);
