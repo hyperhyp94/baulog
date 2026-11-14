@@ -1654,7 +1654,12 @@ function bonPruefen() {
         <div><label for="bon-total">Gesamtsumme laut Bon (€)</label>
           <input id="bon-total" inputmode="decimal" value="${e.gesamt != null ? zahlEin(e.gesamt) : ''}" oninput="bonSumme()"></div>
       </div>
-      <div class="summe"><span>Positionen</span><b id="bon-summe">–</b></div>
+      <label style="display:flex; gap:8px; align-items:center; font-weight:normal; flex-wrap:wrap">
+        <input type="checkbox" id="bon-netto" style="width:auto; min-height:0" ${e.preise_netto ? 'checked' : ''} onchange="bonSumme()">
+        Preise sind netto – MwSt. draufrechnen
+        <input id="bon-mwst" inputmode="decimal" value="${zahlEin(e.mwst_satz || 19)}" style="width:56px" oninput="bonSumme()"> %</label>
+      ${e.preise_netto ? '<p class="hinweis" style="margin-top:2px">Erkannt: Die Rechnung listet Nettopreise, die MwSt. kommt erst am Ende dazu. Gebucht wird brutto.</p>' : ''}
+      <div class="summe"><span>Positionen (brutto)</span><b id="bon-summe">–</b></div>
       <p class="hinweis" id="bon-abgleich"></p>
       <label style="display:flex; gap:8px; align-items:center; font-weight:normal">
         <input type="checkbox" id="bon-sammel" style="width:auto; min-height:0" onchange="bonSumme()"> Nur als ein Sammelposten buchen</label>
@@ -1672,12 +1677,15 @@ function bonPruefen() {
 // damit die Serverprüfung (Summe = Gesamtsumme ±0,02 €) zuverlässig passt.
 function bonPositionen() {
   const markt = $('#bon-markt').value.trim(), datum = $('#bon-datum').value;
-  const rabatt = -Math.abs(parseZahl($('#bon-rabatt').value) || 0);
+  // Nettopreise: MwSt. auf Einzelpreise und Rabatt aufschlagen, gebucht wird brutto
+  const satz = $('#bon-netto') && $('#bon-netto').checked ? (parseZahl($('#bon-mwst').value) || 0) : 0;
+  const mw = 1 + satz / 100;
+  const rabatt = -Math.abs(parseZahl($('#bon-rabatt').value) || 0) * mw;
   const zeilen = [...document.querySelectorAll('tr[data-bonpos]')];
   const lies = tr => ({ name: tr.querySelector('.bp-name').value.trim(),
                         qty: parseZahl(tr.querySelector('.bp-qty').value),
                         unit: tr.querySelector('.bp-unit').value.trim() || null,
-                        unit_price: parseZahl(tr.querySelector('.bp-preis').value) });
+                        unit_price: Math.round(parseZahl(tr.querySelector('.bp-preis').value) * mw * 10000) / 10000 });
   const wert = l => l.reduce((s, p) => s + (p.qty || 0) * (p.unit_price || 0), 0);
   const alle = zeilen.map(lies);
   let pos = zeilen.filter(tr => tr.querySelector('.bp-an').checked).map(lies);
@@ -1690,7 +1698,7 @@ function bonPositionen() {
     return { ziel, pos: pos.length ? [{ name: `Einkauf ${markt || ''} ${datum ? datumKurz(datum) : ''}`.replace(/\s+/g, ' ').trim(),
                                          qty: 1, unit: 'Pauschal', unit_price: ziel }] : [] };
   }
-  if (rabattAnteil && brutto > 0) {
+  if ((rabattAnteil || satz) && brutto > 0) {
     const f = ziel / brutto;
     pos = pos.map(p => ({ ...p, unit_price: Math.round(p.unit_price * f * 10000) / 10000 }));
     const rest = r2(ziel - pos.reduce((s, p) => s + r2(p.qty * p.unit_price), 0));
@@ -2237,13 +2245,13 @@ async function belegInhalt(url, platz) {
   }
   if (n) {
     platz.innerHTML = Array.from({ length: n }, (_, i) =>
-      `<div style="color:#aaa;font-size:13px;margin:10px 0 4px">Seite ${i + 1} von ${n}</div>
+      `<div style="flex:none;color:#aaa;font-size:13px;margin:10px 0 4px">Seite ${i + 1} von ${n}</div>
        <img src="/api/documents/${m[1]}/seite/${i + 1}" alt="Seite ${i + 1}"
-         style="width:100%;max-width:1000px;min-height:200px;height:auto;display:block;background:#fff">`).join('')
+         style="flex:none;width:100%;max-width:1000px;height:auto;display:block;background:#fff">`).join('')
       + '<div style="height:40px;flex:none"></div>';
     return;
   }
-  platz.innerHTML = `<img src="${url}" style="max-width:100%;height:auto;display:block" alt="Beleg">`;
+  platz.innerHTML = `<img src="${url}" style="flex:none;max-width:100%;height:auto;display:block" alt="Beleg">`;
   platz.querySelector('img').onerror = () => {
     platz.innerHTML = `<iframe src="${url}" style="width:100%;height:100%;border:0;background:#fff"></iframe>`;
   };

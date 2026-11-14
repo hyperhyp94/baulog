@@ -30,7 +30,7 @@ class ReceiptError(Exception):
 SCHEMA = {
     "type": "object",
     "additionalProperties": False,
-    "required": ["haendler", "datum", "belegnr", "gesamt", "positionen", "rabatte", "hinweise"],
+    "required": ["haendler", "datum", "belegnr", "gesamt", "preise_netto", "mwst_satz", "positionen", "rabatte", "hinweise"],
     "properties": {
         "haendler": {"type": ["string", "null"]},
         "datum": {"type": ["string", "null"], "description": "YYYY-MM-DD"},
@@ -61,6 +61,9 @@ SCHEMA = {
             },
         },
         "hinweise": {"type": "array", "items": {"type": "string"}},
+        "preise_netto": {"type": "boolean",
+                         "description": "true, wenn die Positionspreise OHNE MwSt. sind und die MwSt. erst am Ende auf die Summe kommt"},
+        "mwst_satz": {"type": ["number", "null"], "description": "MwSt.-Satz in Prozent, z. B. 19"},
     },
 }
 
@@ -69,13 +72,17 @@ Bei mehreren Bildern sind es nacheinander fotografierte Abschnitte desselben Bel
 von oben nach unten, mit Überlappung: Zeilen, die auf zwei Bildern zu sehen sind,
 nur EINMAL übernehmen.
 
-Erfasse jede gekaufte Artikelzeile als Position (Bruttopreise, wie gedruckt).
+Erfasse jede gekaufte Artikelzeile als Position mit den Preisen GENAU WIE GEDRUCKT.
+- Prüfe, ob die Positionspreise netto sind (typisch bei Rechnungen: "Nettobetrag",
+  "zzgl. MwSt.", MwSt. wird erst unter der Summe addiert). Dann preise_netto=true und
+  mwst_satz = der Satz (meist 19). Bei Kassenbons mit Bruttopreisen preise_netto=false.
+- Rabatte in derselben Form (netto/brutto) wie die Positionen angeben.
 - Mengenzeilen wie "3 x 4,99" gehören zur Artikelzeile: menge=3, einzelpreis=4.99.
 - Gewichts-/Längenangaben (z. B. "2,5 m x 3,20") als menge mit passender einheit.
 - Pfand gehört als eigene Position dazu.
 - Rabatte/Gutscheine/Coupons NICHT als Position, sondern unter rabatte mit negativem betrag.
 - Zwischensummen, MwSt-Aufstellungen, Zahlungsart, Rückgeld ignorieren.
-- gesamt = zu zahlender Endbetrag.
+- gesamt = zu zahlender Endbetrag (brutto, inkl. MwSt.).
 Unleserliches oder Unsicheres kurz unter hinweise nennen (deutsch). Nichts erfinden;
 fehlende Werte als null."""
 
@@ -270,7 +277,20 @@ def normalize(raw: dict) -> dict:
     gesamt = raw.get("gesamt")
     gesamt = round(_num(gesamt), 2) if gesamt is not None else None
 
+    netto = raw.get("preise_netto") is True
+    satz = _num(raw.get("mwst_satz"), 19.0) if netto else None
+    if netto and not (0 < satz <= 30):
+        satz = 19.0
     summe_pos = round(sum(p["summe"] for p in positionen) + sum(r["betrag"] for r in rabatte), 2)
+    if netto:
+        summe_pos = round(summe_pos * (1 + satz / 100), 2)
+    # Fallback: Modell sagt brutto, aber Summe passt genau mit 19 % / 7 % → netto
+    elif gesamt and abs(summe_pos - gesamt) > 0.02:
+        for test in (19.0, 7.0):
+            if abs(round(summe_pos * (1 + test / 100), 2) - gesamt) <= 0.05:
+                netto, satz = True, test
+                summe_pos = round(summe_pos * (1 + test / 100), 2)
+                break
     return {
         "haendler": (str(raw.get("haendler")).strip()[:200] if raw.get("haendler") else None),
         "datum": datum,
@@ -279,6 +299,8 @@ def normalize(raw: dict) -> dict:
         "positionen": positionen,
         "rabatte": rabatte,
         "hinweise": [str(h)[:300] for h in (raw.get("hinweise") or []) if h][:20],
+        "preise_netto": netto,
+        "mwst_satz": satz,
         "summe_positionen": summe_pos,
         "differenz": round(summe_pos - gesamt, 2) if gesamt is not None else None,
     }
