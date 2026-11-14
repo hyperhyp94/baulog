@@ -1707,7 +1707,7 @@ function bonSumme() {
   const diff = r2(ziel - total);
   el.style.color = Math.abs(diff) <= 0.02 ? 'var(--green, green)' : 'var(--red)';
   el.textContent = Math.abs(diff) <= 0.02 ? '✓ passt zur Gesamtsumme vom Bon'
-    : `Differenz ${euro(diff)} zur Bon-Summe – fehlt eine Zeile zwischen zwei Fotos? Ohne Übereinstimmung wird nicht gebucht.`;
+    : `Differenz ${euro(diff)} zur Bon-Summe – fehlt eine Zeile zwischen zwei Fotos? Beim Speichern wird nachgefragt.`;
 }
 
 function bonBuchen() {
@@ -1718,8 +1718,16 @@ function bonBuchen() {
     if (!purchase_date) throw new Error('Bitte das Kaufdatum eintragen.');
     const { pos, ziel, teil } = bonPositionen();
     // Teilauswahl: gebucht wird die Summe der gewählten Positionen.
-    const total = teil ? ziel : parseZahl($('#bon-total').value);
-    if (!(total >= 0)) throw new Error('Bitte die Gesamtsumme vom Bon eintragen.');
+    const bonTotal = parseZahl($('#bon-total').value);
+    if (!teil && Math.abs(r2(ziel - (bonTotal || 0))) > 0.02) {
+      const ok = confirm(`Die Positionen ergeben ${euro(ziel)}, auf dem Bon stehen `
+        + (bonTotal >= 0 ? euro(bonTotal) : 'keine Gesamtsumme') + `.
+
+Trotzdem ${euro(ziel)} buchen?`);
+      if (!ok) return;
+    }
+    // Gebucht wird immer die Summe der gewählten Positionen.
+    const total = ziel;
     if (!pos.length) throw new Error('Keine Position ausgewählt.');
     if (pos.some(p => !p.name || !(p.qty > 0) || !(p.unit_price >= 0)))
       throw new Error('Jede Position braucht Bezeichnung, Menge und Preis.');

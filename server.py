@@ -392,7 +392,10 @@ def app_icons(fname):
 @app.route("/")
 def index():
     """Liefert index.html aus dem Projektverzeichnis."""
-    return send_from_directory(os.path.dirname(os.path.abspath(__file__)), "index.html")
+    resp = send_from_directory(os.path.dirname(os.path.abspath(__file__)), "index.html")
+    # iPhone-Home-Bildschirm-App hält die Seite sonst im Cache und zeigt alte Versionen.
+    resp.headers["Cache-Control"] = "no-cache"
+    return resp
 
 
 # ---------------------------------------------------------------------------
