@@ -582,7 +582,8 @@ async function ladeProjekt(pid) {
   const vorher = (P && P.pid === pid) ? P : null;
   const pd = await api('GET', `/api/projects/${pid}`);
   const sites = pd.sites.slice().sort((a, b) => (a.created_at < b.created_at ? -1 : 1));
-  const [siteDetails, taskListen, docListen] = await Promise.all([
+  const [bonListe, siteDetails, taskListen, docListen] = await Promise.all([
+    api('GET', `/api/receipts?project_id=${pid}`).catch(() => ({ receipts: [] })),
     Promise.all(sites.map(s => api('GET', `/api/sites/${s.id}`))),
     Promise.all(sites.map(s => api('GET', `/api/sites/${s.id}/tasks`))),
     Promise.all(sites.map(s => api('GET', `/api/documents?site_id=${s.id}`))),
@@ -601,6 +602,8 @@ async function ladeProjekt(pid) {
 
   P = {
     pid, project: pd.project, sites, trades, tasks, zeiten, materialien,
+    bons: Object.fromEntries((bonListe.receipts || []).map(b => [b.id, b])),
+    bonOffen: vorher ? vorher.bonOffen : new Set(),
     docs: [...docs.values()].sort((a, b) => (a.created_at < b.created_at ? 1 : -1)),
     tab: vorher ? vorher.tab : 'logbuch',
     filter: vorher ? vorher.filter : { task: '', art: '', zahlung: '' },
@@ -813,8 +816,65 @@ function htmlLogbuch(alle) {
     tage.map(tag => `
     <div class="tag">
       <div class="tag-kopf"><span>${datumLang(tag.datum)}</span><span>${euro(summen(tag.eintraege).gesamt)}</span></div>
-      ${tag.eintraege.map(htmlEintrag).join('')}
+      ${htmlTagEintraege(tag.eintraege)}
     </div>`).join('');
+}
+
+// Material-Positionen eines Kassenbons als EINE aufklappbare Zeile zeigen
+function htmlTagEintraege(liste) {
+  const gruppen = new Map(), out = [];
+  liste.forEach(e => {
+    const rid = e.art === 'material' && e.roh.receipt_id;
+    if (!rid) { out.push(e); return; }
+    if (!gruppen.has(rid)) { const g = { bon: true, rid, pos: [] }; gruppen.set(rid, g); out.push(g); }
+    gruppen.get(rid).pos.push(e);
+  });
+  return out.map(e => e.bon ? htmlBon(e) : htmlEintrag(e)).join('');
+}
+
+function htmlBon(g) {
+  const b = P.bons[g.rid] || {};
+  const summe = r2(g.pos.reduce((s, e) => s + e.betrag, 0));
+  const gezahlt = r2(g.pos.reduce((s, e) => s + e.gezahlt, 0));
+  const alleBezahlt = g.pos.every(e => e.paid);
+  const offen = P.bonOffen.has(g.rid);
+  const abw = b.total != null && Math.abs(summe - b.total) > 0.02;
+  const ohne = g.pos.some(e => !e.billed);
+  const unter = [P.tasks.length > 1 ? esc(aufgabeName(g.pos[0].task_id)) : '',
+    `${anzahl(g.pos.length, 'Position', 'Positionen')}${offen ? '' : ' – antippen zum Aufklappen'}`,
+    abw ? `<span style="color:var(--red)">⚠ weicht vom Bon ab (Bon: ${euro(b.total)})</span>` : '',
+    ohne ? '<span style="color:var(--red)">ohne Rechnung</span>' : ''].filter(Boolean).join(' · ');
+  return `<div class="eintrag">
+    <button class="e-haupt" onclick="bonAufklappen(${g.rid})" aria-expanded="${offen}">
+      <span class="e-typ material">Bon</span>
+      <span class="e-text"><b>${offen ? '▾' : '▸'} ${esc(b.store || g.pos[0].roh.store || 'Kassenbon')}</b><small>${unter}</small></span>
+      <span class="e-betrag">${euro(summe)}</span>
+    </button>
+    <button class="zahlung ${alleBezahlt ? 'bezahlt' : (gezahlt > 0 ? 'teil' : 'offen')}" onclick="bonBezahlt(${g.rid})"
+      title="Ganzen Bon als ${alleBezahlt ? 'offen' : 'bezahlt'} markieren">${alleBezahlt ? '✓ bezahlt' : (gezahlt > 0 ? `<span>teilweise</span><span>${euro(gezahlt)}</span>` : 'offen')}</button>
+  </div>${offen ? `<div style="margin:0 0 6px 18px; border-left:3px solid var(--line)">${g.pos.map(htmlEintrag).join('')}
+    ${P.docs.filter(d => d.receipt_id === g.rid).length ? `<p class="hinweis" style="margin:6px 8px">Bon-Fotos: ${P.docs.filter(d => d.receipt_id === g.rid)
+      .map((d, i) => `<a href="/api/documents/${d.id}/file" target="_blank" rel="noopener">Foto ${i + 1}</a>`).join(' · ')}</p>` : ''}</div>` : ''}`;
+}
+
+function bonAufklappen(rid) {
+  if (P.bonOffen.has(rid)) P.bonOffen.delete(rid); else P.bonOffen.add(rid);
+  zeichneProjekt();
+}
+
+async function bonBezahlt(rid) {
+  const pos = P.materialien.filter(m => m.receipt_id === rid);
+  const neu = pos.every(m => m.paid) ? 0 : 1;
+  try {
+    for (const m of pos) {
+      if (m.paid !== neu || m.paid_amount) {
+        await api('PUT', `/api/materials/${m.id}`, { paid: neu, paid_amount: 0 });
+        m.paid = neu; m.paid_amount = 0;
+      }
+    }
+    zeichneProjekt();
+    showToast(neu ? 'Bon als bezahlt markiert' : 'Bon wieder offen', 'success');
+  } catch (err) { showError(err.message); await neuLaden(); }
 }
 
 function htmlEintrag(e) {
