@@ -1401,15 +1401,20 @@ def api_document_seite(doc_id: int, nr: int):
     pfad = _pdf_pfad(doc_id)
     if not pfad or nr < 1 or nr > 200:
         return _err("Seite nicht gefunden.", 404)
-    try:
-        r = subprocess.run(["pdftoppm", "-r", "130", "-jpeg", "-jpegopt", "quality=85",
-                            "-f", str(nr), "-l", str(nr), "-singlefile", pfad, "-"],
-                           capture_output=True, timeout=60)
-    except (OSError, subprocess.SubprocessError):
-        return _err("PDF konnte nicht gelesen werden.", 500)
-    if r.returncode != 0 or not r.stdout:
-        return _err("Seite nicht gefunden.", 404)
-    resp = app.response_class(r.stdout, mimetype="image/jpeg")
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        ziel = os.path.join(tmp, "s")
+        try:
+            r = subprocess.run(["pdftoppm", "-r", "130", "-jpeg", "-jpegopt", "quality=85",
+                                "-f", str(nr), "-l", str(nr), "-singlefile", pfad, ziel],
+                               capture_output=True, timeout=60)
+        except (OSError, subprocess.SubprocessError):
+            return _err("PDF konnte nicht gelesen werden.", 500)
+        if r.returncode != 0 or not os.path.exists(ziel + ".jpg"):
+            return _err("Seite nicht gefunden.", 404)
+        with open(ziel + ".jpg", "rb") as fh:
+            bild = fh.read()
+    resp = app.response_class(bild, mimetype="image/jpeg")
     resp.headers["Cache-Control"] = "max-age=86400"
     return resp
 
