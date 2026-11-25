@@ -55,3 +55,15 @@ BAULOG_ZUFALL_SEEDS=300 python -m pytest tests/test_guthaben_zufall.py   # Dauer
 Der Zufallstest führt lange, beliebige Folgen aus Ändern, Löschen, Umbenennen, Personenwechsel,
 Verschieben und Rückgängig aus und prüft nach **jedem** Schritt die Regeln (unabhängiges Prüf-Orakel in
 `scripts/check_db.py`) sowie, dass ein erneuter Abgleich nichts mehr ändert.
+
+## Stundenzettel
+
+Bei **Abrechnen** erzeugt der Knopf „Stundenzettel“ je Person einen Stundenbericht als PDF ohne
+Beträge: Stunden je Kalenderwoche (Montag–Sonntag) und je Monat mit zwei Diagrammen, auf Wunsch mit
+den einzelnen Tagen, für einen wählbaren Zeitraum (Von/Bis: ein angegebenes Bis zählt höchstens bis
+heute; leer = erster bis letzter erfasster Tag) in diesem oder allen Projekten. **Ø pro Woche** =
+Stunden ÷ alle Wochen im Zeitraum (Wochen ohne Arbeit zählen mit), **Ø pro Arbeitswoche** = Stunden ÷
+Wochen mit Stunden; es zählen alle Einträge, mit und ohne Rechnung.
+Endpunkt:
+`GET /api/projects/<id>/stundenzettel.pdf?person=<Name>&alle=0|1&tage=0|1[&von=YYYY-MM-DD][&bis=YYYY-MM-DD]`;
+das PDF entsteht wie beim Projektbericht mit WeasyPrint im System-Python (`stundenzettel.py`).

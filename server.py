@@ -24,6 +24,7 @@ from werkzeug.utils import secure_filename
 
 import db
 import receipts
+import stundenzettel
 
 # ---------------------------------------------------------------------------
 # App-Konfiguration
@@ -2233,6 +2234,73 @@ def api_projekt_bericht(pid: int):
     if request.args.get("archiv") == "1":
         _bericht_archivieren(pid, projekt, name, daten)
     resp = app.response_class(daten, mimetype="application/pdf")
+    resp.headers["Content-Disposition"] = f'inline; filename="{name}"'
+    return resp
+
+
+@app.route("/api/projects/<int:pid>/stundenzettel.pdf", methods=["GET"])
+def api_stundenzettel(pid: int):
+    """
+    Stundenzettel einer Person als PDF: Stunden je Woche und Monat, ohne Beträge (Modul stundenzettel).
+    Query: person (Pflicht), von/bis (YYYY-MM-DD, inklusive; leer = nicht angegeben), alle=1 (alle Projekte
+    statt nur dieses), tage=0 (ohne die einzelnen Tage; Standard: mit).
+    """
+    import re
+    import subprocess
+    import tempfile
+    projekt = db.get_project(pid)
+    if not projekt:
+        return _err("Projekt nicht gefunden.", 404)
+    person = (request.args.get("person") or "").strip()
+    if not person:
+        return _err("Query-Parameter 'person' fehlt.")
+    grenzen = []
+    for feld in ("von", "bis"):
+        wert = request.args.get(feld) or None                   # leer = nicht angegeben
+        if wert:
+            try:
+                # Streng YYYY-MM-DD (date.fromisoformat allein nimmt seit Python 3.11 auch "20261101" an), und ein echtes Datum
+                if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", wert):
+                    raise ValueError(wert)
+                date.fromisoformat(wert)
+            except ValueError:
+                return _err(f"'{feld}' muss ein gültiges Datum im Format YYYY-MM-DD sein.")
+        grenzen.append(wert)
+    von, bis = grenzen
+    if von and bis and von > bis:
+        return _err("Von liegt nach Bis.")
+    alle = request.args.get("alle") == "1"
+    conn = db.get_conn()
+    try:
+        zeilen = stundenzettel.zeilen_holen(conn, person, None if alle else pid, von, bis)
+    finally:
+        conn.close()
+    daten = stundenzettel.auswerten(zeilen, von, bis)
+    # „Keine Stunden“ gilt für die Auswertung, nicht für die SQL-Zeilen: sie deckelt ein angegebenes bis auf heute und
+    # verwirft Zeilen danach. Eine leere Auswertung hat weder Person noch Zeitraum (also kein Dateiname, kein Unterprozess).
+    if not daten["tage"]:
+        return _err(f"Keine Stunden von '{person}' im gewählten Zeitraum.", 404)
+    if daten["wochen_im_zeitraum"] > 520:
+        return _err("Der Zeitraum ist zu groß (höchstens 10 Jahre). Bitte Von/Bis einschränken.")
+    angaben = {"daten": daten, "projekt": "Alle Projekte" if alle else projekt["name"],
+               "mit_tagen": request.args.get("tage") != "0", "erstellt": time.strftime("%d.%m.%Y, %H:%M"),
+               "alle_projekte": alle}
+    with tempfile.TemporaryDirectory() as tmp:
+        ziel = os.path.join(tmp, "stundenzettel.pdf")
+        try:
+            r = subprocess.run(
+                ["/usr/bin/python3", os.path.join(os.path.dirname(os.path.abspath(__file__)), "stundenzettel.py"), ziel],
+                input=json.dumps(angaben), capture_output=True, text=True, timeout=120)
+        except (OSError, subprocess.SubprocessError) as exc:
+            app.logger.error("Stundenzettel-Fehler: %s", exc)
+            return _err("Stundenzettel konnte nicht erstellt werden.", 500)
+        if r.returncode != 0 or not os.path.exists(ziel):
+            app.logger.error("Stundenzettel-Fehler (Rückgabecode %s): %s", r.returncode, r.stderr[-1000:])
+            return _err("Stundenzettel konnte nicht erstellt werden.", 500)
+        with open(ziel, "rb") as fh:
+            pdf = fh.read()
+    name = secure_filename(f"Stundenzettel_{daten['person']}_{daten['von']}_{daten['bis']}.pdf") or "Stundenzettel.pdf"
+    resp = app.response_class(pdf, mimetype="application/pdf")
     resp.headers["Content-Disposition"] = f'inline; filename="{name}"'
     return resp
 

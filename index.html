@@ -1175,7 +1175,9 @@ function htmlAbrechnen() {
       <td class="r">${zahl(r2(p.offenStd))} Std.</td>
       <td class="r">${p.offen > 0.004 ? `<b>${euro(p.offen)}</b>` : '✓'}</td>
       <td class="r">${p.guthaben > 0.004 ? `<span style="color:var(--green)">${euro(p.guthaben)}</span>` : '–'}</td>
-      <td class="r"><button class="klein" data-person="${esc(p.name)}" onclick="formAbrechnen(this.dataset.person)">Auszahlung</button></td></tr>`).join('');
+      <td class="r"><div style="display:flex; gap:6px; justify-content:flex-end; flex-wrap:wrap">
+        <button class="klein" data-person="${esc(p.name)}" onclick="formAbrechnen(this.dataset.person)">Auszahlung</button>
+        <button class="klein hell" data-person="${esc(p.name)}" onclick="formStundenzettel(this.dataset.person)">Stundenzettel</button></div></td></tr>`).join('');
   const einz = liste.flatMap(p => (((P.guthaben || {})[p.name] || {}).einzahlungen || []).map(x => ({ ...x, person: p.name })))
     .sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
   return `
@@ -2385,6 +2387,22 @@ function formBericht() {
       <span class="spacer"></span><button id="ber-los" onclick="berichtErstellen()">PDF erstellen</button></div>`);
 }
 
+// Zeigt eine fertige PDF-Antwort im Dialog (Projektbericht und Stundenzettel): grüne Statuszeile mit Größe, im Fuß
+// „Herunterladen“ und „Teilen / Sichern“ (wo das Gerät Dateien teilen kann) bzw. „Öffnen“. Der Dateiname kommt aus
+// Content-Disposition, sonst standardName. vorspann steht als Text vor „✓ Fertig“.
+function pdfFertig(res, blob, st, { vorspann = '', standardName = 'Baulog_Bericht.pdf' } = {}) {
+  const name = (/filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') || '') || [])[1] || standardName;
+  const datei = new File([blob], name, { type: 'application/pdf' });
+  const burl = URL.createObjectURL(blob);
+  const teilbar = navigator.canShare && navigator.canShare({ files: [datei] });
+  st.style.color = 'var(--green)';
+  st.textContent = vorspann + `✓ Fertig (${blob.size < 1048576 ? Math.max(1, Math.round(blob.size / 1024)) + ' KB' : (blob.size / 1048576).toFixed(1).replace('.', ',') + ' MB'})`;
+  $('#modal-content .modal-fuss').innerHTML = `<a class="btn hell" href="${burl}" download="${esc(name)}">Herunterladen</a>
+    <span class="spacer"></span>
+    ${teilbar ? '<button id="ber-teilen">Teilen / Sichern</button>' : `<a class="btn" href="${burl}" target="_blank" rel="noopener">Öffnen</a>`}`;
+  if (teilbar) $('#ber-teilen').onclick = () => navigator.share({ files: [datei], title: name }).catch(() => {});
+}
+
 async function berichtErstellen() {
   const fotos = $('#ber-fotos').checked ? 1 : 0;
   const archiv = $('#ber-archiv').checked ? 1 : 0;
@@ -2395,18 +2413,66 @@ async function berichtErstellen() {
     const res = await fetch(url);
     if (!res.ok) { let j = {}; try { j = await res.json(); } catch (e) { /* */ } throw new Error(j.error || 'Fehler ' + res.status); }
     const blob = await res.blob();
-    const name = (/filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') || '') || [])[1] || 'Baulog_Bericht.pdf';
-    const datei = new File([blob], name, { type: 'application/pdf' });
-    const burl = URL.createObjectURL(blob);
-    const teilbar = navigator.canShare && navigator.canShare({ files: [datei] });
-    st.style.color = 'var(--green)';
     if (archiv) neuLaden().catch(() => {});
-    st.innerHTML = (archiv ? `✓ Archiviert${App.paperless ? ' (Paperless läuft im Hintergrund)' : ''} · ` : '') + `✓ Fertig (${blob.size < 1048576 ? Math.max(1, Math.round(blob.size / 1024)) + ' KB' : (blob.size / 1048576).toFixed(1).replace('.', ',') + ' MB'})`;
-    $('#modal-content .modal-fuss').innerHTML = `<a class="btn hell" href="${burl}" download="${esc(name)}">Herunterladen</a>
-      <span class="spacer"></span>
-      ${teilbar ? '<button id="ber-teilen">Teilen / Sichern</button>' : `<a class="btn" href="${burl}" target="_blank" rel="noopener">Öffnen</a>`}`;
-    if (teilbar) $('#ber-teilen').onclick = () => navigator.share({ files: [datei], title: name }).catch(() => {});
+    pdfFertig(res, blob, st, { vorspann: archiv ? `✓ Archiviert${App.paperless ? ' (Paperless läuft im Hintergrund)' : ''} · ` : '' });
   } catch (e) {
+    st.textContent = '✗ ' + e.message; st.style.color = 'var(--red)'; knopf.disabled = false;
+  }
+}
+
+// ============================================================
+// STUNDENZETTEL (PDF) – bei Abrechnen, je Person
+// ============================================================
+function formStundenzettel(person) {
+  openModal(`${modalKopf('Stundenzettel · ' + person)}
+    <div class="modal-body">
+      <p style="margin-top:0">Stunden je Woche und Monat mit Durchschnitt und zwei Diagrammen – ohne Beträge.</p>
+      <div class="grid2 umbruch">
+        <div><label for="sz-von">Von</label><input type="date" id="sz-von" max="${heute()}"></div>
+        <div><label for="sz-bis">Bis</label><input type="date" id="sz-bis" max="${heute()}"></div>
+      </div>
+      <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:8px">
+        <button type="button" class="chip" onclick="stundenzettelZeitraum('alles')">Alles</button>
+        <button type="button" class="chip" onclick="stundenzettelZeitraum('dieser')">Dieser Monat</button>
+        <button type="button" class="chip" onclick="stundenzettelZeitraum('letzter')">Letzter Monat</button>
+      </div>
+      <p class="hinweis">Leer lassen = ohne Grenze, also alle erfassten Tage.</p>
+      <label>Welche Projekte?</label>${seg('sz-projekt', 0, [[0, 'Nur dieses Projekt'], [1, 'Alle Projekte']])}
+      <label style="display:flex; gap:8px; align-items:center; font-weight:normal">
+        <input type="checkbox" id="sz-tage" style="width:auto; min-height:0" checked> Einzelne Tage auflisten</label>
+      <p class="hinweis" id="sz-status"></p>
+    </div>
+    <div class="modal-fuss"><button class="hell" onclick="closeModal()">Abbrechen</button>
+      <span class="spacer"></span><button id="sz-los" data-person="${esc(person)}" onclick="stundenzettelErstellen(this.dataset.person)">PDF erstellen</button></div>`);
+}
+
+// Schnellwahl für Von/Bis mit lokalen Datumsteilen (nicht UTC): 'alles' leert beide Felder, 'dieser' = 1. des Monats
+// bis heute, 'letzter' = voller Vormonat (im Januar der Dezember davor: new Date(y, -1, 1) und new Date(y, 0, 0)).
+function stundenzettelZeitraum(art) {
+  const jetzt = new Date(), y = jetzt.getFullYear(), m = jetzt.getMonth();
+  const [von, bis] = art === 'dieser' ? [isoDatum(new Date(y, m, 1)), isoDatum(jetzt)]
+    : art === 'letzter' ? [isoDatum(new Date(y, m - 1, 1)), isoDatum(new Date(y, m, 0))]
+    : ['', ''];
+  $('#sz-von').value = von;
+  $('#sz-bis').value = bis;
+  modalGeaendert = true;   // wie beim Umschalter: ein Klick daneben soll die Wahl nicht verwerfen
+}
+
+async function stundenzettelErstellen(person) {
+  const von = $('#sz-von').value, bis = $('#sz-bis').value;
+  const url = `/api/projects/${P.pid}/stundenzettel.pdf?person=${encodeURIComponent(person)}`
+    + `&alle=${segWert('sz-projekt') === 1 ? 1 : 0}&tage=${$('#sz-tage').checked ? 1 : 0}`
+    + (von ? `&von=${encodeURIComponent(von)}` : '') + (bis ? `&bis=${encodeURIComponent(bis)}` : '');
+  const knopf = $('#sz-los'), st = $('#sz-status');
+  knopf.disabled = true; st.textContent = 'Stundenzettel wird erstellt …'; st.style.color = 'var(--grey)';
+  try {
+    const res = await fetch(url);
+    if (!res.ok) { let j = {}; try { j = await res.json(); } catch (e) { /* */ } throw new Error(j.error || 'Fehler ' + res.status); }
+    const blob = await res.blob();
+    if (!st.isConnected) return;   // Dialog wurde inzwischen geschlossen: das Ergebnis nicht in einen anderen Dialog schreiben
+    pdfFertig(res, blob, st, { standardName: 'Stundenzettel.pdf' });
+  } catch (e) {
+    // Der Servertext nennt den eingetippten Namen: nur als Text anzeigen, nie als HTML
     st.textContent = '✗ ' + e.message; st.style.color = 'var(--red)'; knopf.disabled = false;
   }
 }
