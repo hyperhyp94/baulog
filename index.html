@@ -313,6 +313,9 @@ const WOCHENTAGE = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
 function euro(v) { return EUR.format(Number(v) || 0); }
 function zahl(v) { return (Number(v) || 0).toLocaleString('de-DE', { maximumFractionDigits: 2 }); }
 function r2(v) { return Math.round((Number(v) || 0) * 100) / 100; }
+// Betrag eines Stundeneintrags: kommt vom Server (dieselbe SQL-Rundung wie Summen und Auszahlungs-Verrechnung,
+// sonst können einzelne Cent auseinanderlaufen); die eigene Rechnung ist nur der Rückfall.
+function kostenZeit(e) { return e.kosten != null ? e.kosten : r2(e.hours * e.hourly_rate + (e.travel_cost || 0)); }
 function zahlEin(v) { return v == null ? '' : String(v).replace('.', ','); }
 function anzahl(n, einzahl, mehrzahl) { return `${n} ${n === 1 ? einzahl : mehrzahl}`; }
 
@@ -676,9 +679,9 @@ function eintraege() {
   const z = P.zeiten.map(e => ({
     art: 'zeit', id: e.id, task_id: e.task_id, ts: e.created_at,
     datum: e.work_date || lokalesDatum(e.created_at),
-    betrag: r2(e.hours * e.hourly_rate + (e.travel_cost || 0)), anfahrt: e.travel_cost || 0,
+    betrag: kostenZeit(e), anfahrt: e.travel_cost || 0,
     billed: e.billed, paid: e.paid, roh: e,
-    gezahlt: e.paid ? r2(e.hours * e.hourly_rate + (e.travel_cost || 0)) : r2(e.paid_amount || 0),
+    gezahlt: e.paid ? kostenZeit(e) : r2(e.paid_amount || 0),
   }));
   const m = P.materialien.map(x => ({
     art: 'material', id: x.id, task_id: x.task_id, ts: x.created_at,
@@ -1139,7 +1142,7 @@ function htmlAuswertung() {
 function personRestOffen(name) {
   const ids = (App.offeneJePerson || {})[name] || [];
   const liste = P.zeiten.filter(e => ids.includes(e.id));
-  const betrag = r2(liste.reduce((a, e) => a + e.hours * e.hourly_rate + (e.travel_cost || 0) - (e.paid_amount || 0), 0));
+  const betrag = r2(liste.reduce((a, e) => a + kostenZeit(e) - (e.paid_amount || 0), 0));
   return { ids, betrag };
 }
 
@@ -1152,7 +1155,7 @@ function abrPersonen() {
   const m = new Map();
   P.zeiten.forEach(e => {
     const k = e.person; if (!k) return;
-    const betrag = r2(e.hours * e.hourly_rate + (e.travel_cost || 0));
+    const betrag = kostenZeit(e);
     const gez = e.paid ? betrag : r2(e.paid_amount || 0);
     const p = m.get(k) || { name: k, std: 0, kosten: 0, offen: 0, offenStd: 0, tage: [] };
     p.std += e.hours; p.kosten += betrag;
@@ -1509,7 +1512,7 @@ function speichereZeit(id, weiter) {
 function loescheZeit(id) {
   const e = P.zeiten.find(x => x.id === id);
   bestaetigen('Eintrag löschen?',
-    `${esc(e.person)} · ${zahl(e.hours)} Std. (${euro(e.hours * e.hourly_rate + (e.travel_cost || 0))}) wird gelöscht.`, 'Löschen', async () => {
+    `${esc(e.person)} · ${zahl(e.hours)} Std. (${euro(kostenZeit(e))}) wird gelöscht.`, 'Löschen', async () => {
       await api('DELETE', `/api/timeentries/${id}`);
       closeModal();
       showToast('Eintrag gelöscht', 'success');
@@ -2126,7 +2129,8 @@ const VERLAUF_TABELLEN = {
   guthaben_verbrauch: 'Guthaben-Verrechnung', receipts: 'Kassenbon' };
 const VERLAUF_FELDER = { paid: 'bezahlt', paid_amount: 'Teilzahlung', hours: 'Stunden', hourly_rate: 'Stundensatz',
   work_date: 'Datum', billed: 'mit Rechnung', qty: 'Menge', unit_price: 'Preis', name: 'Name', title: 'Titel',
-  status: 'Status', travel_cost: 'Anfahrt', store: 'Markt', purchase_date: 'Kaufdatum', person: 'Person', total: 'Summe' };
+  status: 'Status', travel_cost: 'Anfahrt', store: 'Markt', purchase_date: 'Kaufdatum', person: 'Person', total: 'Summe',
+  betrag: 'Betrag' };
 const VERLAUF_AKTION = { insert: 'angelegt', update: 'geändert', delete: 'gelöscht' };
 const Verlauf = { liste: [], filter: '' };
 
@@ -2177,7 +2181,9 @@ function zeichneVerlauf() {
           <div><b>${esc(VERLAUF_TABELLEN[c.tbl] || c.tbl)} ${VERLAUF_AKTION[c.action]}</b>: ${esc(verlaufTitel(c))}
             <div class="hinweis">${lokal.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} Uhr · ${esc(c.quelle || 'direkt in der Datenbank')}${c.undone_by ? ' · rückgängig gemacht' : ''}</div>
             <div style="font-size:13px; margin-top:4px">${verlaufDetails(c)}</div></div>
-          ${c.undone_by ? '' : `<button class="hell klein" onclick="verlaufUndo(${c.id})">Rückgängig</button>`}
+          ${c.undone_by ? '' : (c.quelle === 'Abgleich'
+            ? '<span class="hinweis">automatische Folge</span>'
+            : `<button class="hell klein" onclick="verlaufUndo(${c.id})">Rückgängig</button>`)}
         </div></div>`;
     }).join('') || '<div class="leer">Noch keine Änderungen protokolliert.</div>'}</div>`;
 }

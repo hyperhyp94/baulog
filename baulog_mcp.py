@@ -846,7 +846,7 @@ def zeiteintrag_anlegen(aufgabe_id: int, person: str, stunden: float,
         res["gebucht"] = {"projekt": kontext["projekt"], "aufgabe": kontext["aufgabe"], "person": p["name"],
                           "datum": date.fromisoformat(work_date).strftime("%d.%m.%Y"), "stunden": stunden,
                           "stundensatz": satz, "anfahrt": anfahrt or 0,
-                          "betrag": _r2(stunden * float(satz) + float(anfahrt or 0)),
+                          "betrag": _betrag_zeit(stunden, satz, anfahrt),
                           "mit_rechnung": bool(billed), "bezahlt": bool(paid)}
     return res
 
@@ -871,6 +871,11 @@ def zeiteintrag_bearbeiten(zeiteintrag_id: int, person: str = None,
                            bereits_gezahlt: float = None) -> dict:
     """
     Ändert nur die angegebenen Felder eines Zeiteintrags.
+
+    Auszahlung und Guthaben bleiben dabei automatisch synchron: Wird der Betrag eines per Auszahlung
+    bezahlten Tags kleiner, geht der Überschuss ins Guthaben der Person zurück; wird er größer, ist der
+    Mehrbetrag offen. Ein per Auszahlung bezahlter Tag lässt sich NICHT auf „offen“ oder auf weniger
+    Teilzahlung setzen (Fehler) — dafür müsste Sven die Auszahlung im Baulog-Verlauf rückgängig machen.
 
     :param zeiteintrag_id: ID des Zeiteintrags (aus projekt_uebersicht oder zeiteintraege_liste).
     :param person: Neuer Personenname — muss in den Stammdaten existieren.
@@ -1236,6 +1241,20 @@ def _r2(wert) -> float:
     return round(float(wert or 0), 2)
 
 
+def _betrag_zeit(stunden, satz, anfahrt=0) -> float:
+    """
+    Betrag eines Stundeneintrags mit derselben SQL-Rundung wie der Server und alle Summen.
+    Python-round() rundet exakte Hälften anders (0,25 h × 10,50 € = 2,625 → 2,62 statt 2,63).
+    """
+    import sqlite3
+    c = sqlite3.connect(":memory:")
+    try:
+        return c.execute("SELECT ROUND(? * ? + ?, 2)",
+                         (float(stunden), float(satz), float(anfahrt or 0))).fetchone()[0]
+    finally:
+        c.close()
+
+
 def projekt_uebersicht(projekt_id: int) -> dict:
     """
     ALLES zu einem Projekt in einem Aufruf — der beste Einstieg, bevor etwas
@@ -1290,7 +1309,10 @@ def projekt_uebersicht(projekt_id: int) -> dict:
                     "datum": e["work_date"] or (e["created_at"] or "")[:10],
                     "ohne_arbeitsdatum": not e["work_date"],
                     "person": e["person"], "stunden": e["hours"], "stundensatz": e["hourly_rate"],
-                    "anfahrt": anfahrt, "betrag": _r2(e["hours"] * e["hourly_rate"] + anfahrt),
+                    "anfahrt": anfahrt,
+                    # Betrag kommt vom Server (SQL-Rundung wie in allen Summen); nur Notnagel für ältere Server
+                    "betrag": e["kosten"] if e.get("kosten") is not None
+                    else _r2(e["hours"] * e["hourly_rate"] + anfahrt),
                     "mit_rechnung": bool(e["billed"]), "bezahlt": bool(e["paid"]),
                     "teilweise_gezahlt": _r2(e.get("paid_amount") or 0) if not e["paid"] else 0,
                 })
@@ -1367,6 +1389,8 @@ def person_bezahlt_markieren(projekt_id: int, person: str, bezahlt: bool = True,
     → person_bezahlt_markieren(projekt_id, "Robert", bis_datum="2026-11-06").
     Ändert nur Einträge mit anderem Status. Einzelne Einträge stattdessen mit
     zeiteintrag_bearbeiten(bezahlt=…), Material mit material_bearbeiten(bezahlt=…).
+    Tage, die per Auszahlung (Guthaben) bezahlt sind, lassen sich nicht auf „offen“ zurücksetzen —
+    das Tool meldet dann einen Fehler und nennt bereits_geaendert; Sven fragen (Auszahlung im Verlauf).
 
     Parameter:
         projekt_id — ID des Projekts.

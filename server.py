@@ -805,9 +805,9 @@ def api_task_get(task_id: int):
     time_entries = _rows(db.list_time_entries({"task_id": task_id}))
     materials = _rows(db.list_materials({"task_id": task_id}))
     documents = _rows(db.list_documents({"task_id": task_id}))
-    # Kosten je Eintrag ergänzen (Zeiteinträge inkl. Anfahrt)
+    # Kosten je Eintrag ergänzen (Zeiteinträge inkl. Anfahrt) — SQL-Rundung wie in allen Summen
     for e in time_entries:
-        e["kosten"] = round(e["hours"] * e["hourly_rate"] + e["travel_cost"], 2)
+        e["kosten"] = db.euro_betrag(e["hours"], e["hourly_rate"], e["travel_cost"])
     for m in materials:
         m["kosten"] = round(m["qty"] * m["unit_price"], 2)
     mat_gesamt = sum(m["kosten"] for m in materials)
@@ -879,7 +879,7 @@ def api_timeentries_list(task_id: int):
         return _err("Aufgabe nicht gefunden.", 404)
     entries = _rows(db.list_time_entries({"task_id": task_id}))
     for e in entries:
-        e["kosten"] = round(e["hours"] * e["hourly_rate"] + e["travel_cost"], 2)
+        e["kosten"] = db.euro_betrag(e["hours"], e["hourly_rate"], e["travel_cost"])
     return _ok(time_entries=entries)
 
 
@@ -953,16 +953,17 @@ def api_timeentries_create(task_id: int):
     tz = {"paid": paid}
     if "paid_amount" in data:
         tz["paid_amount"] = data["paid_amount"]
-    err = _teilzahlung_normalisieren(tz, hours * rate + travel_cost)
+    err = _teilzahlung_normalisieren(tz, db.euro_betrag(hours, rate, travel_cost))
     if err:
         return err
+    # Teilzahlung gleich beim Anlegen speichern (nicht danach): vorhandenes Guthaben wird auf den
+    # noch offenen Rest verrechnet — ein späteres Überschreiben von paid_amount ließe beides auseinanderlaufen.
     eid = db.create_time_entry(
         task_id=task_id, person=person, person_id=person_id,
         hours=hours, hourly_rate=rate, billed=billed, paid=tz["paid"],
         work_date=work_date, travel_cost=travel_cost,
+        paid_amount=tz.get("paid_amount") or 0.0,
     )
-    if tz.get("paid_amount"):
-        db.update_time_entry(eid, {"paid_amount": tz["paid_amount"]})
     return _ok(id=eid), 201
 
 
@@ -976,6 +977,11 @@ def api_timeentry_update(eid: int):
       "travel_cost" }.
     Gesetzte 'person_id' synchronisiert den 'person'-Text; 'person_id': null löst
     die Verknüpfung (Text bleibt erhalten). 'travel_cost': null setzt die Anfahrt auf 0.
+
+    Auszahlung/Guthaben bleiben synchron: Wird ein per Auszahlung bezahlter Tag billiger, geht
+    der Überschuss an die Auszahlung (Guthaben) zurück; wird er teurer, ist der Mehrbetrag offen.
+    Ein per Auszahlung bezahlter Tag lässt sich nicht auf „offen“ setzen → 409 (stattdessen die
+    Auszahlung im Verlauf rückgängig machen).
     """
     if not db.get_time_entry(eid):
         return _err("Zeiteintrag nicht gefunden.", 404)
@@ -1028,10 +1034,14 @@ def api_timeentry_update(eid: int):
         neu_h = fields.get("hours", alt["hours"])
         neu_r = fields.get("hourly_rate", alt["hourly_rate"])
         neu_t = fields.get("travel_cost", alt["travel_cost"] or 0)
-        err = _teilzahlung_normalisieren(fields, neu_h * neu_r + neu_t)
+        err = _teilzahlung_normalisieren(fields, db.euro_betrag(neu_h, neu_r, neu_t))
         if err:
             return err
-    db.update_time_entry(eid, fields)
+    try:
+        db.update_time_entry(eid, fields)
+    except db.ZahlungsKonfliktError as exc:
+        # Tag ist per Auszahlung bezahlt — „offen“/weniger bezahlt würde Auszahlung und Guthaben auseinanderlaufen lassen
+        return _err(str(exc), 409)
     return _ok()
 
 
@@ -1087,6 +1097,10 @@ def api_guthaben_create(pid: int):
     amount, err = _num_field(data, "amount", required=True, greater_than=0)
     if err:
         return err
+    if not db.person_bekannt(pid, person):
+        # Eine Auszahlung hängt nur am Namen: ein Tippfehler legte ein Guthaben an, das nie verrechnet wird
+        return _err(f"Person '{person}' ist unbekannt (weder in den Personen noch mit Stunden in diesem "
+                    f"Projekt). Bitte den Namen prüfen oder die Person zuerst anlegen.")
     notiz = data.get("notiz") or None
     res = db.guthaben_einzahlen(pid, person, amount, notiz)
     # Aufschlüsselung der gerade gebuchten Auszahlung mitliefern
@@ -2320,8 +2334,8 @@ def _frage_kontext(project_id: int | None = None) -> str:
         zeilen.append("### Stunden je Person, Projekt und Monat (person | projekt | monat | tage | stunden | betrag | bezahlt | offen)")
         for r in q("SELECT te.person, p.name AS projekt, substr(COALESCE(te.work_date, te.created_at),1,7) AS monat, "
                    "COUNT(*) AS tage, SUM(te.hours) AS std, "
-                   "SUM(te.hours*te.hourly_rate + COALESCE(te.travel_cost,0)) AS betrag, "
-                   "SUM(CASE WHEN te.paid THEN te.hours*te.hourly_rate + COALESCE(te.travel_cost,0) ELSE COALESCE(te.paid_amount,0) END) AS bez "
+                   "SUM(ROUND(te.hours*te.hourly_rate + COALESCE(te.travel_cost,0), 2)) AS betrag, "
+                   "SUM(CASE WHEN te.paid THEN ROUND(te.hours*te.hourly_rate + COALESCE(te.travel_cost,0), 2) ELSE COALESCE(te.paid_amount,0) END) AS bez "
                    "FROM time_entries te JOIN tasks t ON t.id=te.task_id JOIN sites s ON s.id=t.site_id "
                    "JOIN projects p ON p.id=s.project_id GROUP BY 1,2,3 ORDER BY 1,2,3"):
             zeilen.append(f"{r['person']} | {r['projekt']} | {r['monat']} | {r['tage']} | {r['std']:g} | "

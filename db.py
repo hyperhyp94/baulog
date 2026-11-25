@@ -428,6 +428,97 @@ class UndoError(Exception):
     pass
 
 
+def _undo_anwenden(conn: sqlite3.Connection, c: sqlite3.Row, cols: set) -> None:
+    """
+    Führt das eigentliche Zurücksetzen aus. Wo Auszahlung/Guthaben betroffen sind, läuft es über
+    dieselben Wege wie eine normale Änderung — so bleibt die Buchführung auch hier synchron.
+    """
+    import json
+    t, aktion, rid = c["tbl"], c["action"], c["row_id"]
+    alt = json.loads(c["old_json"]) if c["old_json"] else {}
+    neu = json.loads(c["new_json"]) if c["new_json"] else {}
+    paare: set = set()
+
+    if aktion == "update":
+        felder = {k: v for k, v in alt.items() if k in cols and k != "id"}
+        geaendert = {k: v for k, v in felder.items() if neu.get(k) != v}
+        if t == "time_entries":
+            erlaubt = {k: v for k, v in geaendert.items() if k in _UPDATE_COLS[t]}
+            sonst = {k: v for k, v in geaendert.items() if k not in _UPDATE_COLS[t]}
+            if set(erlaubt) - {"paid", "paid_amount"}:
+                # Die Zeile änderte auch Person/Betrag/…: ihr Zahlstatus war dann großenteils Folge der
+                # Buchführung (z. B. Verrechnung beim Personenwechsel zurückgenommen). Der alte Wert
+                # würde ein „bezahlt“ zurückbringen, dessen Auszahlung inzwischen frei ist — Geld doppelt.
+                # Darum nur die übrigen Felder zurück; der Zahlstatus ergibt sich neu aus der Buchführung.
+                erlaubt = {k: v for k, v in erlaubt.items() if k not in ("paid", "paid_amount")}
+            if "person" in erlaubt and "person_id" not in erlaubt:
+                # nur der Name zurück, die Verknüpfung bliebe: das wäre das Folgestück eines Umbenennens
+                p = conn.execute("SELECT p.name FROM time_entries te JOIN persons p ON p.id = te.person_id "
+                                 "WHERE te.id = ?", (rid,)).fetchone()
+                if p and not _gleiche_person(conn, p["name"], erlaubt["person"]):
+                    raise UndoError(f"Der Name dieses Eintrags gehört zur Person „{p['name']}“. Bitte das "
+                                    f"Umbenennen der Person rückgängig machen.")
+            try:
+                _, p = _stunde_aendern(conn, rid, erlaubt)
+            except ZahlungsKonfliktError as exc:
+                raise UndoError(str(exc))
+            paare |= p
+        elif t == "persons":
+            erlaubt = {k: v for k, v in geaendert.items() if k in _UPDATE_COLS[t]}
+            sonst = {k: v for k, v in geaendert.items() if k not in _UPDATE_COLS[t]}
+            if erlaubt:
+                _person_aendern(conn, rid, erlaubt)
+        elif t == "sites" and "project_id" in geaendert:
+            erlaubt = {k: v for k, v in geaendert.items() if k in _UPDATE_COLS[t]}
+            sonst = {k: v for k, v in geaendert.items() if k not in _UPDATE_COLS[t]}
+            _site_aendern(conn, rid, erlaubt)
+        else:
+            sonst = felder
+        if sonst:
+            conn.execute(f"UPDATE {t} SET " + ", ".join(f"{k} = ?" for k in sonst) + " WHERE id = ?",
+                         [*sonst.values(), rid])
+    elif aktion == "insert":
+        if t == "guthaben":
+            paar = _guthaben_stornieren(conn, rid)      # die damit bezahlten Tage werden wieder offen
+            if paar:
+                paare.add(paar)
+        elif t == "time_entries":
+            z = _eintrag_kontext(conn, rid)
+            if z:
+                _guthaben_freigeben(conn, rid, zahlstatus_kuerzen=True)
+                paare.add((z["project_id"], z["person"]))
+            conn.execute("DELETE FROM time_entries WHERE id = ?", (rid,))
+        elif t in ("tasks", "sites", "projects"):
+            scope = {"tasks": "t.id = ?", "sites": "s.id = ?", "projects": "s.project_id = ?"}[t]
+            paare |= _stunden_loeschen_vorbereiten(conn, scope, (rid,))
+            conn.execute(f"DELETE FROM {t} WHERE id = ?", (rid,))
+        else:
+            conn.execute(f"DELETE FROM {t} WHERE id = ?", (rid,))
+    else:
+        if conn.execute(f"SELECT 1 FROM {t} WHERE id = ?", (rid,)).fetchone():
+            raise UndoError("Ein Eintrag mit dieser Nummer existiert bereits.")
+        old = {k: v for k, v in alt.items() if k in cols}
+        if t == "time_entries" and old.get("person_id") is not None:
+            # Name aus der verknüpften Person: sie kann seit dem Löschen umbenannt worden sein
+            p = conn.execute("SELECT name FROM persons WHERE id = ?", (old["person_id"],)).fetchone()
+            if p:
+                old["person"] = p["name"]
+        elif t == "guthaben" and not _person_bekannt(conn, old["project_id"], old["person"]):
+            raise UndoError(f"Die Person „{old['person']}“ gibt es unter diesem Namen nicht mehr "
+                            f"(umbenannt?). Die Auszahlung lässt sich deshalb nicht wiederherstellen.")
+        conn.execute(f"INSERT INTO {t} (" + ", ".join(old) + ") VALUES ("
+                     + ", ".join("?" for _ in old) + ")", list(old.values()))
+        if t == "time_entries":
+            z = _eintrag_kontext(conn, rid)
+            if z:
+                paare.add((z["project_id"], z["person"]))
+        elif t == "guthaben":
+            paare.add((old["project_id"], old["person"]))
+
+    for pid, person in paare:
+        _guthaben_abgleichen(conn, pid, person)
+
+
 def undo_change(change_id: int) -> int:
     """
     Macht eine protokollierte Änderung rückgängig und liefert die id des dadurch
@@ -435,10 +526,15 @@ def undo_change(change_id: int) -> int:
     - update → alte Werte zurückschreiben (nur wenn die Zeile seitdem nicht weiter geändert wurde)
     - insert → Zeile löschen
     - delete → Zeile mit alten Werten wieder anlegen
+
+    Auszahlung und Guthaben bleiben dabei synchron: eine Auszahlung rückgängig machen öffnet die
+    damit bezahlten Tage wieder, ein gelöschter Tag kommt ohne „Phantom-Zahlung“ zurück. Einzelne
+    Verrechnungszeilen und das automatische „bezahlt“ einer Auszahlung lassen sich nicht einzeln
+    zurücknehmen — dafür die Auszahlung selbst rückgängig machen.
     """
-    import json
     conn = get_conn()
     try:
+        conn.execute("BEGIN IMMEDIATE")
         c = conn.execute("SELECT * FROM changelog WHERE id = ?", (change_id,)).fetchone()
         if not c:
             raise UndoError("Protokolleintrag nicht gefunden.")
@@ -447,27 +543,29 @@ def undo_change(change_id: int) -> int:
         t = c["tbl"]
         if t not in CHANGELOG_TABLES:
             raise UndoError("Tabelle nicht unterstützt.")
+        if t == "guthaben_verbrauch":
+            raise UndoError("Eine einzelne Verrechnung lässt sich nicht rückgängig machen. Bitte die "
+                            "zugehörige Auszahlung rückgängig machen oder den Stundeneintrag ändern.")
+        if t == "guthaben" and c["action"] == "update":
+            # Eine Auszahlung wird nie selbst geändert — nur als Folge des Umbenennens einer Person
+            raise UndoError("Diese Änderung gehört zum Umbenennen einer Person. Bitte das Umbenennen "
+                            "der Person rückgängig machen.")
+        if c["quelle"] == ABGLEICH:
+            # automatische Folge einer anderen Änderung (Zahlstatus/Verrechnung/Name): einzeln
+            # zurückgenommen würde sie Zahlungen aus dem Nichts erzeugen oder Namen trennen
+            raise UndoError("Diese Änderung ist die automatische Folge einer Auszahlung oder einer "
+                            "anderen Änderung. Bitte die auslösende Änderung rückgängig machen.")
         cols = {r[1] for r in conn.execute(f"PRAGMA table_info({t})")}
         later = conn.execute(
             "SELECT 1 FROM changelog WHERE tbl = ? AND row_id = ? AND id > ? AND undone_by IS NULL "
+            "AND COALESCE(quelle, '') != ? "     # automatische Folgen sind keine eigene spätere Änderung
             "AND id NOT IN (SELECT undone_by FROM changelog WHERE undone_by IS NOT NULL)",
-            (t, c["row_id"], change_id)).fetchone()
+            (t, c["row_id"], change_id, ABGLEICH)).fetchone()
         if later and c["action"] != "delete":
             raise UndoError("Der Eintrag wurde danach noch einmal geändert – bitte zuerst die "
                             "neueren Änderungen rückgängig machen.")
         with conn:
-            if c["action"] == "update":
-                old = {k: v for k, v in json.loads(c["old_json"]).items() if k in cols and k != "id"}
-                conn.execute(f"UPDATE {t} SET " + ", ".join(f"{k} = ?" for k in old) + " WHERE id = ?",
-                             [*old.values(), c["row_id"]])
-            elif c["action"] == "insert":
-                conn.execute(f"DELETE FROM {t} WHERE id = ?", (c["row_id"],))
-            else:
-                if conn.execute(f"SELECT 1 FROM {t} WHERE id = ?", (c["row_id"],)).fetchone():
-                    raise UndoError("Ein Eintrag mit dieser Nummer existiert bereits.")
-                old = {k: v for k, v in json.loads(c["old_json"]).items() if k in cols}
-                conn.execute(f"INSERT INTO {t} (" + ", ".join(old) + ") VALUES ("
-                             + ", ".join("?" for _ in old) + ")", list(old.values()))
+            _undo_anwenden(conn, c, cols)
             new_id = conn.execute("SELECT MAX(id) FROM changelog").fetchone()[0]
             if new_id == change_id:
                 raise UndoError("Es gab nichts zurückzusetzen.")
@@ -596,13 +694,21 @@ def delete_project(project_id: int) -> bool:
     Löscht ein Projekt und kaskadiert (ON DELETE CASCADE) zu Baustellen, Gewerken,
     Aufgaben, Zeiteinträgen, Materialien und Dokumenten.
 
+    Die Auszahlungen des Projekts verschwinden mit ihm. Vorher wird die Verrechnung der Tage
+    freigegeben (protokolliert): Wer das Löschen im Verlauf rückgängig macht, bekommt die Tage so
+    ohne „Phantom-Zahlung“ zurück — die wiederhergestellte Auszahlung deckt sie dann wieder.
+
     :returns: True wenn gelöscht, False wenn nicht gefunden.
     """
     conn = get_conn()
-    with conn:
-        cur = conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
-    conn.close()
-    return cur.rowcount > 0
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        with conn:
+            _stunden_loeschen_vorbereiten(conn, "s.project_id = ?", (project_id,))
+            cur = conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+        return cur.rowcount > 0
+    finally:
+        conn.close()
 
 
 # ---------------------------------------------------------------------------
@@ -668,18 +774,67 @@ def get_site(site_id: int) -> sqlite3.Row | None:
     return row
 
 
+def _stunden_loeschen_vorbereiten(conn: sqlite3.Connection, scope_sql: str, params: tuple) -> set:
+    """
+    Vor einem Kaskaden-Löschen (Aufgabe/Baustelle): gibt die Verrechnung der betroffenen Tage frei
+    und liefert die (Projekt, Person)-Paare, deren Guthaben danach abzugleichen ist.
+    """
+    rows = conn.execute(
+        f"SELECT te.id, s.project_id AS pid, te.person FROM time_entries te {_STUNDE_PROJEKT_JOIN} "
+        f"WHERE {scope_sql} AND EXISTS (SELECT 1 FROM guthaben_verbrauch v WHERE v.time_entry_id = te.id)",
+        params).fetchall()
+    for r in rows:
+        _guthaben_freigeben(conn, r["id"], zahlstatus_kuerzen=True)
+    return {(r["pid"], r["person"]) for r in rows}
+
+
+def _site_aendern(conn: sqlite3.Connection, site_id: int, fields: dict) -> bool:
+    """
+    UPDATE einer Baustelle (läuft in der Transaktion des Aufrufers). Wechselt sie das Projekt,
+    gehören ihre Tage zu anderen Auszahlungen: die Verrechnung des alten Projekts geht zurück,
+    freies Guthaben des neuen Projekts wird verrechnet.
+    """
+    alt = conn.execute("SELECT project_id FROM sites WHERE id = ?", (site_id,)).fetchone()
+    changed = _update_row_in_conn(conn, "sites", site_id, fields)
+    neu = fields.get("project_id")
+    if changed and alt and neu is not None and neu != alt["project_id"]:
+        personen = [r[0] for r in conn.execute(
+            "SELECT DISTINCT te.person FROM time_entries te JOIN tasks t ON t.id = te.task_id "
+            "WHERE t.site_id = ?", (site_id,))]
+        for person in personen:
+            _guthaben_abgleichen(conn, alt["project_id"], person)
+            _guthaben_abgleichen(conn, neu, person)
+    return changed
+
+
 def update_site(site_id: int, fields: dict) -> bool:
     """Aktualisiert die übergebenen Felder einer Baustelle (name, address, status, note, project_id); None leert das Feld."""
-    return _update_row("sites", site_id, fields)
+    _validate_update_fields("sites", fields)
+    if not fields:
+        return False
+    conn = get_conn()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        with conn:
+            changed = _site_aendern(conn, site_id, fields)
+        return changed
+    finally:
+        conn.close()
 
 
 def delete_site(site_id: int) -> bool:
     """Löscht eine Baustelle (kaskadiert zu Gewerken, Aufgaben, Zeiten, Material, Dok.)."""
     conn = get_conn()
-    with conn:
-        cur = conn.execute("DELETE FROM sites WHERE id = ?", (site_id,))
-    conn.close()
-    return cur.rowcount > 0
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        with conn:
+            paare = _stunden_loeschen_vorbereiten(conn, "s.id = ?", (site_id,))
+            cur = conn.execute("DELETE FROM sites WHERE id = ?", (site_id,))
+            for pid, person in paare:
+                _guthaben_abgleichen(conn, pid, person)
+        return cur.rowcount > 0
+    finally:
+        conn.close()
 
 
 # ---------------------------------------------------------------------------
@@ -778,18 +933,26 @@ def create_person(name: str, hourly_rate: float = 0.0, note: str | None = None) 
     """
     Legt eine Person an und gibt ihre ID zurück.
 
-    :param name: Eindeutiger Name (UNIQUE); Duplikat wirft sqlite3.IntegrityError.
+    :param name: Eindeutiger Name (UNIQUE, ohne Beachtung der Groß-/Kleinschreibung — die
+                  Auszahlungs-Buchführung kennt Namen nur so); Duplikat wirft sqlite3.IntegrityError.
     :param hourly_rate: Standard-Stundensatz in Euro (Vorbefüllung bei Zeiterfassung).
     :param note: Optionale Notiz.
     """
     conn = get_conn()
-    with conn:
-        cur = conn.execute(
-            "INSERT INTO persons (name, hourly_rate, note, created_at) VALUES (?, ?, ?, ?)",
-            (name, hourly_rate, note, _now()),
-        )
-    conn.close()
-    return cur.lastrowid
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        with conn:
+            if name and conn.execute("SELECT 1 FROM persons WHERE lower(name) = lower(?)",
+                                     (name.strip(),)).fetchone():
+                raise sqlite3.IntegrityError(
+                    "UNIQUE constraint failed: persons.name (ohne Groß-/Kleinschreibung)")
+            cur = conn.execute(
+                "INSERT INTO persons (name, hourly_rate, note, created_at) VALUES (?, ?, ?, ?)",
+                (name, hourly_rate, note, _now()),
+            )
+        return cur.lastrowid
+    finally:
+        conn.close()
 
 
 def list_persons(active_only: bool = False) -> list[sqlite3.Row]:
@@ -831,29 +994,51 @@ def get_person_by_name(name: str) -> sqlite3.Row | None:
     return row
 
 
+def _person_aendern(conn: sqlite3.Connection, person_id: int, fields: dict) -> bool:
+    """
+    UPDATE einer Person (läuft in der Transaktion des Aufrufers). Umbenennen zieht die
+    denormalisierten Namen mit: time_entries.person UND die Auszahlungen (guthaben.person) —
+    sonst „verschwindet“ das Guthaben der umbenannten Person.
+    """
+    alt = conn.execute("SELECT name FROM persons WHERE id = ?", (person_id,)).fetchone()
+    neu = fields.get("name")
+    if neu and conn.execute("SELECT 1 FROM persons WHERE lower(name) = lower(?) AND id != ?",
+                            (neu.strip(), person_id)).fetchone():
+        # Die Buchführung kennt Namen ohne Groß-/Kleinschreibung: „bob“ neben „Bob“ würde deren
+        # Auszahlungen und Stunden zusammenwerfen.
+        raise sqlite3.IntegrityError("UNIQUE constraint failed: persons.name (ohne Groß-/Kleinschreibung)")
+    changed = _update_row_in_conn(conn, "persons", person_id, fields)
+    if changed and neu:
+        _abgleich_exec(conn, "UPDATE time_entries SET person = ? WHERE person_id = ? AND person IS NOT ?",
+                       (neu, person_id, neu))
+        if alt and alt["name"] != neu:
+            # Auszahlungen und Stunden ohne Verknüpfung (Freitext) hängen nur am Namen: mitziehen
+            _abgleich_exec(conn, "UPDATE time_entries SET person = ? "
+                                 "WHERE person_id IS NULL AND lower(person) = lower(?)", (neu, alt["name"]))
+            _abgleich_exec(conn, "UPDATE guthaben SET person = ? WHERE lower(person) = lower(?)",
+                           (neu, alt["name"]))
+    return changed
+
+
 def update_person(person_id: int, fields: dict) -> bool:
     """
     Aktualisiert die übergebenen Felder einer Person (name, hourly_rate, active, note).
 
-    Umbenennen synchronisiert das denormalisierte Feld time_entries.person.
-
-    Beide UPDATEs (persons + ggf. der time_entries-Rename-Sync) laufen in EINER
-    gemeinsamen Transaktion auf derselben Connection — atomar, nicht zwei
-    unabhängige Verbindungen.
+    Umbenennen synchronisiert das denormalisierte Feld time_entries.person und die Auszahlungen
+    (guthaben.person). Alle UPDATEs laufen in EINER gemeinsamen Transaktion auf derselben
+    Connection — atomar, nicht mehrere unabhängige Verbindungen.
     """
     _validate_update_fields("persons", fields)
     if not fields:
         return False
     conn = get_conn()
-    with conn:
-        changed = _update_row_in_conn(conn, "persons", person_id, fields)
-        if changed and fields.get("name"):
-            conn.execute(
-                "UPDATE time_entries SET person = ? WHERE person_id = ?",
-                (fields["name"], person_id),
-            )
-    conn.close()
-    return changed
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        with conn:
+            changed = _person_aendern(conn, person_id, fields)
+        return changed
+    finally:
+        conn.close()
 
 
 def delete_person(person_id: int) -> bool:
@@ -862,18 +1047,29 @@ def delete_person(person_id: int) -> bool:
     (stattdessen per update_person(id, {"active": 0}) deaktivieren).
     """
     conn = get_conn()
-    n = conn.execute(
-        "SELECT COUNT(*) FROM time_entries WHERE person_id = ?", (person_id,)
-    ).fetchone()[0]
-    if n > 0:
+    try:
+        conn.execute("BEGIN IMMEDIATE")          # Prüfen und Löschen ohne Lücke dazwischen
+        n = conn.execute(
+            "SELECT COUNT(*) FROM time_entries WHERE person_id = ?", (person_id,)
+        ).fetchone()[0]
+        if n > 0:
+            raise PersonInUseError(
+                f"Person hat {n} Zeiteintrag/-einträge — bitte deaktivieren statt löschen."
+            )
+        # Auszahlungen hängen nur am Namen: ohne Person würde das Guthaben verwaisen
+        n = conn.execute(
+            "SELECT COUNT(*) FROM guthaben WHERE lower(person) = "
+            "lower((SELECT name FROM persons WHERE id = ?))", (person_id,)
+        ).fetchone()[0]
+        if n > 0:
+            raise PersonInUseError(
+                f"Person hat {n} Auszahlung(en) — bitte deaktivieren statt löschen."
+            )
+        with conn:
+            cur = conn.execute("DELETE FROM persons WHERE id = ?", (person_id,))
+        return cur.rowcount > 0
+    finally:
         conn.close()
-        raise PersonInUseError(
-            f"Person hat {n} Zeiteintrag/-einträge — bitte deaktivieren statt löschen."
-        )
-    with conn:
-        cur = conn.execute("DELETE FROM persons WHERE id = ?", (person_id,))
-    conn.close()
-    return cur.rowcount > 0
 
 
 # ---------------------------------------------------------------------------
@@ -951,12 +1147,76 @@ def update_task(task_id: int, fields: dict) -> bool:
 
 
 def delete_task(task_id: int) -> bool:
-    """Löscht eine Aufgabe (kaskadiert zu Zeiteinträgen, Materialien, Dokumenten)."""
+    """
+    Löscht eine Aufgabe (kaskadiert zu Zeiteinträgen, Materialien, Dokumenten). Auszahlungen, die
+    Tage dieser Aufgabe bezahlt haben, werden frei und decken andere offene Stunden.
+    """
     conn = get_conn()
-    with conn:
-        cur = conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
-    conn.close()
-    return cur.rowcount > 0
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        with conn:
+            paare = _stunden_loeschen_vorbereiten(conn, "t.id = ?", (task_id,))
+            cur = conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
+            for pid, person in paare:
+                _guthaben_abgleichen(conn, pid, person)
+        return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Auszahlung/Guthaben-Buchführung — Grundlagen
+# ---------------------------------------------------------------------------
+# Auszahlung = Zeile in guthaben. Verrechnung = Zeile in guthaben_verbrauch (welche
+# Auszahlung hat welchen Stundeneintrag bezahlt). Saldo (Guthaben) = Einzahlungen − Verrechnungen.
+#
+# Regeln, die nach JEDER Änderung gelten — auch bei Anpassungen im Nachgang. Sie werden in
+# derselben Transaktion wiederhergestellt (_guthaben_abgleichen), nicht erst später:
+#   1. Ein Eintrag wird nie mit mehr verrechnet, als er kostet oder als bezahlt geführt wird.
+#   2. Verrechnet wird nur innerhalb derselben Person und desselben Projekts.
+#   3. Guthaben und offene Stunden derselben Person schließen sich aus.
+# Unabhängig geprüft werden sie von scripts/check_db.py (guthaben_befunde).
+#
+# Ein einziger Rundungsweg: SQL-ROUND — dieselbe Rundung wie in allen Summen. Python-round()
+# rundet exakte Hälften anders (2,625 → 2,62 statt 2,63) und ließe einzelne Cent auseinanderlaufen.
+
+_EPS = 0.005
+_BETRAG_SQL = "ROUND(te.hours * te.hourly_rate + COALESCE(te.travel_cost, 0), 2)"
+_STUNDE_PROJEKT_JOIN = "JOIN tasks t ON t.id = te.task_id JOIN sites s ON s.id = t.site_id"
+
+
+class ZahlungsKonfliktError(Exception):
+    """Die Änderung würde Zahlstatus und Auszahlungs-Verrechnung eines Tages auseinanderlaufen lassen."""
+
+
+def _eur(x: float) -> str:
+    """Euro-Betrag deutsch formatiert, z. B. 1.112,50 €."""
+    return f"{x:,.2f} €".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def euro_betrag(hours: float, hourly_rate: float, travel_cost: float | None = 0.0) -> float:
+    """Betrag eines Stundeneintrags in Euro (SQL-ROUND, dieselbe Rundung wie alle Summen)."""
+    c = sqlite3.connect(":memory:")
+    try:
+        return c.execute("SELECT ROUND(? * ? + ?, 2)",
+                         (hours, hourly_rate, travel_cost or 0)).fetchone()[0]
+    finally:
+        c.close()
+
+
+ABGLEICH = "Abgleich"   # Quelle im Änderungsprotokoll für automatische Folgen der Buchführung
+
+
+def _abgleich_exec(conn: sqlite3.Connection, sql: str, args=()) -> sqlite3.Cursor:
+    """
+    Führt ein Statement der Auszahlungs-Buchführung aus und kennzeichnet die dadurch protokollierten
+    Zeilen als automatische Folge („Abgleich“). Solche Zeilen sind nie eine eigene Entscheidung und
+    lassen sich deshalb nicht einzeln rückgängig machen — sie würden Zahlungen aus dem Nichts erzeugen.
+    """
+    vorher = conn.execute("SELECT COALESCE(MAX(id), 0) FROM changelog").fetchone()[0]
+    cur = conn.execute(sql, args)
+    conn.execute("UPDATE changelog SET quelle = ? WHERE id > ? AND quelle IS NULL", (ABGLEICH, vorher))
+    return cur
 
 
 # ---------------------------------------------------------------------------
@@ -973,11 +1233,13 @@ def create_time_entry(
     person_id: int | None = None,
     paid: int = 0,
     travel_cost: float = 0.0,
+    paid_amount: float = 0.0,
 ) -> int:
     """
     Legt einen Zeiteintrag (Personalkosten) an.
 
     Kosten werden serverseitig als hours * hourly_rate + travel_cost berechnet.
+    Vorhandenes Guthaben der Person wird sofort verrechnet (älteste Tage zuerst).
 
     :param task_id: ID der Aufgabe.
     :param person: Name der Person.
@@ -987,16 +1249,18 @@ def create_time_entry(
     :param work_date: Optionales Datum der Leistung (ISO YYYY-MM-DD).
     :param person_id: Optionale Verknüpfung mit einer Person.
     :param travel_cost: Anfahrt in Euro für diesen Arbeitstag (Standard: 0).
+    :param paid_amount: Bereits (bar) gezahlter Teilbetrag in Euro, solange paid = 0.
+                        Wird VOR der Guthaben-Verrechnung gespeichert, damit beides zusammenpasst.
     """
     conn = get_conn()
     with conn:
         cur = conn.execute(
             "INSERT INTO time_entries "
-            "(task_id, person, person_id, hours, hourly_rate, billed, paid, work_date, "
+            "(task_id, person, person_id, hours, hourly_rate, billed, paid, paid_amount, work_date, "
             "travel_cost, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (task_id, person, person_id, hours, hourly_rate, billed, paid, work_date,
-             travel_cost, _now()),
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (task_id, person, person_id, hours, hourly_rate, billed, paid, paid_amount or 0.0,
+             work_date, travel_cost, _now()),
         )
         eid = cur.lastrowid
         if not paid:
@@ -1005,7 +1269,7 @@ def create_time_entry(
                 "WHERE t.id = ?", (task_id,)
             ).fetchone()
             if proj:
-                _guthaben_verrechnen(conn, proj["project_id"], person)
+                _guthaben_abgleichen(conn, proj["project_id"], person)
     conn.close()
     return eid
 
@@ -1034,8 +1298,7 @@ def _guthaben_verrechnen(conn: sqlite3.Connection, project_id: int, person: str)
     if saldo <= 0.004:
         return 0.0
     offene = conn.execute(
-        "SELECT te.* FROM time_entries te "
-        "JOIN tasks t ON t.id = te.task_id JOIN sites s ON s.id = t.site_id "
+        f"SELECT te.*, {_BETRAG_SQL} AS betrag FROM time_entries te {_STUNDE_PROJEKT_JOIN} "
         "WHERE s.project_id = ? AND lower(te.person) = lower(?) AND te.paid = 0 "
         "ORDER BY COALESCE(te.work_date, substr(te.created_at, 1, 10)), te.id",
         (project_id, person.strip()),
@@ -1044,7 +1307,7 @@ def _guthaben_verrechnen(conn: sqlite3.Connection, project_id: int, person: str)
     for r in offene:
         if saldo <= 0.004:
             break
-        betrag = round(r["hours"] * r["hourly_rate"] + (r["travel_cost"] or 0), 2)
+        betrag = r["betrag"]
         offen = round(betrag - (r["paid_amount"] or 0), 2)
         take = round(min(saldo, offen), 2)
         if take <= 0.004:
@@ -1065,7 +1328,8 @@ def _guthaben_verrechnen(conn: sqlite3.Connection, project_id: int, person: str)
             if frei <= 0.004:
                 continue
             abbuchen = round(min(rest, frei), 2)
-            conn.execute(
+            _abgleich_exec(
+                conn,
                 "INSERT INTO guthaben_verbrauch (guthaben_id, time_entry_id, betrag, created_at) "
                 "VALUES (?, ?, ?, ?)",
                 (top["id"], r["id"], abbuchen, _now()),
@@ -1073,13 +1337,220 @@ def _guthaben_verrechnen(conn: sqlite3.Connection, project_id: int, person: str)
             rest = round(rest - abbuchen, 2)
         neu = round((r["paid_amount"] or 0) + take, 2)
         voll = neu >= betrag - 0.004
-        conn.execute(
+        _abgleich_exec(
+            conn,
             "UPDATE time_entries SET paid = ?, paid_amount = ? WHERE id = ?",
             (1 if voll else 0, 0 if voll else neu, r["id"]),
         )
         saldo = round(saldo - take, 2)
         verrechnet = round(verrechnet + take, 2)
     return verrechnet
+
+
+def _eintrag_kontext(conn: sqlite3.Connection, entry_id: int):
+    """Zeiteintrag samt SQL-gerundetem Betrag und Projekt (oder None)."""
+    return conn.execute(
+        f"SELECT te.*, {_BETRAG_SQL} AS betrag, s.project_id AS project_id "
+        f"FROM time_entries te {_STUNDE_PROJEKT_JOIN} WHERE te.id = ?", (entry_id,)
+    ).fetchone()
+
+
+def _bezahlt_betrag(z) -> float:
+    """Als bezahlt geführter Euro-Anteil eines Eintrags (Zeile aus _eintrag_kontext)."""
+    return z["betrag"] if z["paid"] else round(z["paid_amount"] or 0, 2)
+
+
+def _zahlstatus_setzen(conn: sqlite3.Connection, entry_id: int, bezahlt: float, betrag: float,
+                       freigegeben: float = 0.0) -> None:
+    """
+    Setzt paid/paid_amount passend zu einem bezahlten Euro-Betrag (voll bezahlt ⇒ paid=1, paid_amount=0).
+    freigegeben: Betrag, der dem Tag gerade aus einer Auszahlung zurückging. Bei einem 0-€-Tag
+    heißt das: er gilt als offen (ein altes „bezahlt“ würde nach einer späteren Betragserhöhung Geld
+    verdoppeln, weil das Guthaben ja wieder frei ist); ein bar gezahlter Anteil bleibt als Teilzahlung.
+    """
+    if betrag <= _EPS:
+        if freigegeben > _EPS:
+            teil = max(0.0, round(bezahlt, 2))
+            _abgleich_exec(
+                conn, "UPDATE time_entries SET paid = 0, paid_amount = ? "
+                      "WHERE id = ? AND (paid IS NOT 0 OR paid_amount IS NOT ?)", (teil, entry_id, teil))
+        return
+    bezahlt = max(0.0, round(bezahlt, 2))
+    paid, teil = (1, 0.0) if bezahlt >= betrag - _EPS else (0, bezahlt)
+    _abgleich_exec(
+        conn,
+        "UPDATE time_entries SET paid = ?, paid_amount = ? "
+        "WHERE id = ? AND (paid IS NOT ? OR paid_amount IS NOT ?)",
+        (paid, teil, entry_id, paid, teil))
+
+
+def _verbrauch_kuerzen(conn: sqlite3.Connection, verbrauch_id: int, betrag: float, nimm: float) -> float:
+    """Nimmt `nimm` € aus einer Verrechnungszeile zurück (die Zeile verschwindet, wenn nichts übrig bleibt)."""
+    if nimm >= betrag - _EPS:
+        _abgleich_exec(conn, "DELETE FROM guthaben_verbrauch WHERE id = ?", (verbrauch_id,))
+        return round(betrag, 2)
+    _abgleich_exec(conn, "UPDATE guthaben_verbrauch SET betrag = ? WHERE id = ?",
+                   (round(betrag - nimm, 2), verbrauch_id))
+    return round(nimm, 2)
+
+
+def _guthaben_freigeben(conn: sqlite3.Connection, entry_id: int, menge: float | None = None,
+                        zahlstatus_kuerzen: bool = False,
+                        pool: tuple[int, str] | None = None) -> float:
+    """
+    Gibt Verrechnung eines Stundeneintrags an die Auszahlungen zurück — die jüngste Verrechnung
+    zuerst. menge=None gibt alles frei; pool=(Projekt, Person) beschränkt auf deren Auszahlungen.
+    zahlstatus_kuerzen: der Tag verliert den bezahlten Anteil, den die Auszahlung getragen hat
+    (Person gewechselt, Tag gelöscht, Auszahlung storniert). Gibt den freigegebenen Betrag zurück.
+    """
+    sql = ("SELECT v.id, v.betrag FROM guthaben_verbrauch v JOIN guthaben g ON g.id = v.guthaben_id "
+           "WHERE v.time_entry_id = ?")
+    args: list = [entry_id]
+    if pool:
+        sql += " AND g.project_id = ? AND lower(g.person) = lower(?)"
+        args += [pool[0], pool[1].strip()]
+    rest = None if menge is None else round(menge, 2)
+    frei = 0.0
+    for v in conn.execute(sql + " ORDER BY v.id DESC", args).fetchall():
+        if rest is not None and rest <= _EPS:
+            break
+        nimm = v["betrag"] if rest is None else min(v["betrag"], rest)
+        genommen = _verbrauch_kuerzen(conn, v["id"], v["betrag"], nimm)
+        frei = round(frei + genommen, 2)
+        if rest is not None:
+            rest = round(rest - genommen, 2)
+    if zahlstatus_kuerzen and frei > _EPS:
+        z = _eintrag_kontext(conn, entry_id)
+        _zahlstatus_setzen(conn, entry_id, _bezahlt_betrag(z) - frei, z["betrag"], frei)
+    return frei
+
+
+def _guthaben_abgleichen(conn: sqlite3.Connection, project_id: int, person: str) -> dict:
+    """
+    Stellt die Regeln der Buchführung für eine Person im Projekt wieder her und verrechnet
+    danach freies Guthaben auf offene Stunden. Idempotent: ein zweiter Aufruf ändert nichts.
+    Läuft in der Transaktion des Aufrufers.
+    Rückgabe: {"freigegeben": €, der an die Auszahlungen zurückging, "verrechnet": € neu verrechnet}
+    """
+    person = person.strip()
+    frei = 0.0
+
+    # (a) Verrechnungen, die nicht (mehr) zu Person oder Projekt des Eintrags passen
+    #     (Person gewechselt, Baustelle in ein anderes Projekt verschoben, direkt in der DB geändert)
+    for v in conn.execute(
+            "SELECT v.id, v.time_entry_id AS eid, v.betrag FROM guthaben_verbrauch v "
+            "JOIN guthaben g ON g.id = v.guthaben_id "
+            f"JOIN time_entries te ON te.id = v.time_entry_id {_STUNDE_PROJEKT_JOIN} "
+            "WHERE g.project_id = ? AND lower(g.person) = lower(?) "
+            "AND (lower(te.person) != lower(g.person) OR s.project_id != g.project_id) "
+            "ORDER BY v.id DESC", (project_id, person)).fetchall():
+        genommen = _verbrauch_kuerzen(conn, v["id"], v["betrag"], v["betrag"])
+        z = _eintrag_kontext(conn, v["eid"])
+        _zahlstatus_setzen(conn, v["eid"], _bezahlt_betrag(z) - genommen, z["betrag"], genommen)
+        frei = round(frei + genommen, 2)
+
+    # (b) Ein Tag ist mit mehr verrechnet, als er (jetzt) kostet bzw. als bezahlt geführt wird
+    #     (Stunden/Satz/Anfahrt nachträglich gesenkt, „bezahlt“ zurückgenommen, Rückgängig)
+    for e in conn.execute(
+            f"SELECT te.id, {_BETRAG_SQL} AS betrag, te.paid, te.paid_amount, "
+            "(SELECT COALESCE(SUM(v.betrag), 0) FROM guthaben_verbrauch v "
+            " JOIN guthaben g ON g.id = v.guthaben_id WHERE v.time_entry_id = te.id "
+            " AND g.project_id = ? AND lower(g.person) = lower(?)) AS verr "
+            f"FROM time_entries te {_STUNDE_PROJEKT_JOIN} "
+            "WHERE s.project_id = ? AND lower(te.person) = lower(?)",
+            (project_id, person, project_id, person)).fetchall():
+        if e["verr"] <= _EPS:
+            continue
+        deckel = min(e["betrag"], e["betrag"] if e["paid"] else (e["paid_amount"] or 0))
+        if e["verr"] > deckel + _EPS:
+            rueck = _guthaben_freigeben(conn, e["id"], menge=e["verr"] - deckel, pool=(project_id, person))
+            frei = round(frei + rueck, 2)
+            z = _eintrag_kontext(conn, e["id"])
+            if z["betrag"] <= _EPS:
+                # 0-€-Tag: der per Auszahlung bezahlte Teil ist weg, ein bar gezahlter Anteil bleibt.
+                # Enthält der Zahlstatus die Auszahlung noch (bezahlt ≥ verrechnet), ist der Baranteil der
+                # Rest; steht dort schon nur der Baranteil (so setzt ihn _stunde_aendern), bleibt er stehen.
+                bezahlt_vor = e["betrag"] if e["paid"] else (e["paid_amount"] or 0)
+                bar = bezahlt_vor - e["verr"] if bezahlt_vor >= e["verr"] - _EPS else bezahlt_vor
+                _zahlstatus_setzen(conn, e["id"], max(0.0, bar), z["betrag"], rueck)
+            else:
+                # eine Teilzahlung, die den (gesenkten) Betrag erreicht, gilt als voll bezahlt
+                _zahlstatus_setzen(conn, e["id"], _bezahlt_betrag(z), z["betrag"])
+
+    # (c) freies Guthaben auf offene Stunden verrechnen (älteste Tage zuerst)
+    return {"freigegeben": frei, "verrechnet": _guthaben_verrechnen(conn, project_id, person)}
+
+
+def _guthaben_abgleich_alle_conn(conn: sqlite3.Connection) -> dict:
+    """Gleicht jede Person ab, für die es Auszahlungen gibt (jede Verrechnung hängt an einer Auszahlung)."""
+    paare = conn.execute(
+        "SELECT project_id AS pid, MIN(person) AS person FROM guthaben "
+        "GROUP BY project_id, lower(person)").fetchall()
+    frei = verrechnet = 0.0
+    for p in paare:
+        r = _guthaben_abgleichen(conn, p["pid"], p["person"])
+        frei += r["freigegeben"]
+        verrechnet += r["verrechnet"]
+    return {"personen": len(paare), "freigegeben": round(frei, 2), "verrechnet": round(verrechnet, 2)}
+
+
+def _guthaben_stornieren(conn: sqlite3.Connection, guthaben_id: int) -> tuple[int, str] | None:
+    """
+    Macht eine Auszahlung vollständig rückgängig: die damit bezahlten Tage werden wieder offen
+    (direkt/bar gezahlte Anteile bleiben bezahlt), danach wird die Auszahlung selbst gelöscht.
+    Gibt (Projekt, Person) zum anschließenden Abgleich zurück.
+    """
+    g = conn.execute("SELECT project_id, person FROM guthaben WHERE id = ?", (guthaben_id,)).fetchone()
+    if g is None:
+        return None
+    for v in conn.execute(
+            "SELECT id, time_entry_id AS eid, betrag FROM guthaben_verbrauch "
+            "WHERE guthaben_id = ? ORDER BY id DESC", (guthaben_id,)).fetchall():
+        genommen = _verbrauch_kuerzen(conn, v["id"], v["betrag"], v["betrag"])
+        z = _eintrag_kontext(conn, v["eid"])
+        _zahlstatus_setzen(conn, v["eid"], _bezahlt_betrag(z) - genommen, z["betrag"], genommen)
+    conn.execute("DELETE FROM guthaben WHERE id = ?", (guthaben_id,))
+    return g["project_id"], g["person"]
+
+
+def guthaben_abgleich_alle(anwenden: bool = False) -> dict:
+    """
+    Stellt die Regeln der Buchführung für ALLE Personen wieder her (Reparatur- und Prüfwerkzeug,
+    siehe scripts/guthaben_abgleich.py). anwenden=False rechnet nur und rollt zurück (Trockenlauf).
+    Rückgabe: {"angewendet", "personen", "freigegeben", "verrechnet", "salden": [...], "tage": [...]}
+    """
+    def stand(conn):
+        salden = {(r["project_id"], r["person"].lower()): (r["person"], _guthaben_saldo_conn(conn, r["project_id"], r["person"]))
+                  for r in conn.execute("SELECT project_id, MIN(person) AS person FROM guthaben "
+                                        "GROUP BY project_id, lower(person)")}
+        tage = {r["id"]: (r["paid"], round(r["paid_amount"] or 0, 2))
+                for r in conn.execute("SELECT id, paid, paid_amount FROM time_entries")}
+        verbrauch = {r["id"]: (r["guthaben_id"], r["time_entry_id"], r["betrag"])
+                     for r in conn.execute("SELECT * FROM guthaben_verbrauch")}
+        return salden, tage, verbrauch
+
+    conn = get_conn()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        s0, t0, v0 = stand(conn)
+        ergebnis = _guthaben_abgleich_alle_conn(conn)
+        s1, t1, v1 = stand(conn)
+        if anwenden:
+            conn.commit()
+        else:
+            conn.rollback()
+    finally:
+        conn.close()
+    ergebnis["angewendet"] = bool(anwenden)
+    ergebnis["salden"] = [
+        {"projekt_id": k[0], "person": s1[k][0], "vorher": s0.get(k, (None, 0.0))[1], "nachher": s1[k][1]}
+        for k in sorted(s1) if abs(s1[k][1] - s0.get(k, (None, 0.0))[1]) > _EPS]
+    ergebnis["tage"] = [
+        {"id": i, "vorher": {"paid": t0[i][0], "paid_amount": t0[i][1]},
+         "nachher": {"paid": t1[i][0], "paid_amount": t1[i][1]}}
+        for i in sorted(t1) if i in t0 and t0[i] != t1[i]]
+    ergebnis["verrechnungen_geaendert"] = sum(1 for i in set(v0) | set(v1) if v0.get(i) != v1.get(i))
+    return ergebnis
 
 
 def guthaben_einzahlen(project_id: int, person: str, betrag: float, notiz: str | None = None) -> dict:
@@ -1097,7 +1568,7 @@ def guthaben_einzahlen(project_id: int, person: str, betrag: float, notiz: str |
                 "VALUES (?, ?, ?, ?, ?)",
                 (project_id, person.strip(), round(betrag, 2), notiz, _now()),
             )
-            verrechnet = _guthaben_verrechnen(conn, project_id, person)
+            verrechnet = _guthaben_abgleichen(conn, project_id, person)["verrechnet"]
             saldo = _guthaben_saldo_conn(conn, project_id, person)
         return {"verrechnet": verrechnet, "saldo": saldo}
     finally:
@@ -1163,9 +1634,141 @@ def get_time_entry(entry_id: int) -> sqlite3.Row | None:
     return row
 
 
+def _gleiche_person(conn: sqlite3.Connection, a: str, b: str) -> bool:
+    """Gleicher Name — mit derselben Groß-/Kleinschreibung-Regel wie alle Auszahlungs-Abfragen (SQL lower)."""
+    return bool(conn.execute("SELECT lower(?) = lower(?)", (a.strip(), b.strip())).fetchone()[0])
+
+
+def _person_bekannt(conn: sqlite3.Connection, project_id: int, name: str) -> bool:
+    """Gibt es eine Person dieses Namens — in den Stammdaten oder mit Stunden im Projekt?"""
+    return bool(conn.execute(
+        "SELECT EXISTS(SELECT 1 FROM persons p WHERE lower(p.name) = lower(?)) OR "
+        f"EXISTS(SELECT 1 FROM time_entries te {_STUNDE_PROJEKT_JOIN} "
+        "WHERE s.project_id = ? AND lower(te.person) = lower(?))",
+        (name.strip(), project_id, name.strip())).fetchone()[0])
+
+
+def person_bekannt(project_id: int, name: str) -> bool:
+    """Gibt es eine Person dieses Namens — in den Stammdaten oder mit Stunden im Projekt?"""
+    conn = get_conn()
+    try:
+        return _person_bekannt(conn, project_id, name)
+    finally:
+        conn.close()
+
+
+def _stunde_aendern(conn: sqlite3.Connection, entry_id: int, fields: dict) -> tuple[bool, set]:
+    """
+    UPDATE eines Zeiteintrags samt Zahlstatus-Logik (läuft in der Transaktion des Aufrufers).
+    Gibt (geändert, {(Projekt, Person)}) zurück — für diese Personen ist danach abzugleichen.
+
+    - Bezahlte Euro bleiben bezahlt: Ein per Auszahlung finanzierter Tag behält beim Ändern von Betrag
+      (oder Person) die Euro, die schon bezahlt waren. Wird er TEURER, ist der Mehrbetrag offen; wird
+      er BILLIGER, geht der Überschuss an die Auszahlung zurück (Abgleich). Das gilt auch, wenn die
+      Oberfläche den Zahlstatus nur als Echo mitschickt oder der Server ihn dabei umrechnet hat.
+    - „bezahlt“/Teilzahlung darf nicht unter den per Auszahlung verrechneten Betrag sinken.
+    - Wechselt die Person, geht die Verrechnung an die bisherige Person zurück; nur der bar bezahlte
+      Anteil bleibt am Tag.
+    - Name und Verknüpfung (person/person_id) bleiben eins.
+    """
+    _validate_update_fields("time_entries", fields)
+    alt = _eintrag_kontext(conn, entry_id)
+    if alt is None or not fields:
+        return False, set()
+    fields = dict(fields)
+    if fields.get("person_id") is not None:
+        # der Name im Eintrag folgt immer der verknüpften Person (er steht doppelt und wird beim
+        # Umbenennen nachgezogen — ein veralteter Name würde den Tag von der Auszahlung trennen)
+        p = conn.execute("SELECT name FROM persons WHERE id = ?", (fields["person_id"],)).fetchone()
+        if p:
+            fields["person"] = p["name"]
+    elif fields.get("person") and "person_id" not in fields:
+        # nur der Name wurde geändert (z. B. direkt über die API): zur gleichnamigen Person verknüpfen,
+        # sonst die Verknüpfung lösen — sonst gehörte der Tag zu einem Namen und einer anderen Person
+        p = conn.execute("SELECT id, name FROM persons WHERE lower(name) = lower(?)",
+                         (fields["person"].strip(),)).fetchone()
+        if p:
+            fields["person_id"], fields["person"] = p["id"], p["name"]
+        else:
+            fields["person_id"] = None
+    verr = round(conn.execute("SELECT COALESCE(SUM(betrag), 0) FROM guthaben_verbrauch "
+                              "WHERE time_entry_id = ?", (entry_id,)).fetchone()[0], 2)
+    neu_betrag = conn.execute(
+        "SELECT ROUND(? * ? + ?, 2)",
+        (fields.get("hours", alt["hours"]), fields.get("hourly_rate", alt["hourly_rate"]),
+         fields.get("travel_cost", alt["travel_cost"]) or 0)).fetchone()[0]
+    if neu_betrag is None:       # z. B. hours=None: die DB lehnt das beim UPDATE selbst ab (NOT NULL)
+        neu_betrag = alt["betrag"]
+    neue_person = fields.get("person") or alt["person"]
+    wechsel = not _gleiche_person(conn, neue_person, alt["person"])
+    paare = {(alt["project_id"], alt["person"])}
+    if wechsel:
+        paare.add((alt["project_id"], neue_person))
+
+    # Zahlstatus, den die Anfrage am Ende ergibt (bezahlt = Euro), und die bisher bezahlten Euro,
+    # gedeckelt auf den neuen Betrag
+    bezahlt_alt = _bezahlt_betrag(alt)
+    paid = int(fields.get("paid", alt["paid"]))
+    teil = round(fields.get("paid_amount", alt["paid_amount"]) or 0, 2)
+    angefragt = neu_betrag if paid else teil
+    gedeckelt_alt = min(bezahlt_alt, neu_betrag)
+    # „unverändert“ = nicht angefasst, nur das Echo des Formulars — oder dem Wert nach dasselbe
+    # (der Server rechnet das Echo „Teilzahlung 50“ bei einem Betrag von 40 zu „bezahlt“ um)
+    unveraendert = ((paid == alt["paid"] and abs(teil - (alt["paid_amount"] or 0)) <= _EPS)
+                    or abs(angefragt - gedeckelt_alt) <= _EPS)
+    if verr > _EPS and unveraendert:
+        bezahlt = gedeckelt_alt                  # die schon bezahlten Euro bleiben bezahlt
+    else:
+        bezahlt = angefragt
+
+    if wechsel and verr > _EPS:
+        _guthaben_freigeben(conn, entry_id)      # die Verrechnung gehört zur Auszahlung der bisherigen Person
+        if unveraendert:
+            bezahlt = max(0.0, round(bezahlt - verr, 2))      # nur der Baranteil bleibt am Tag
+    elif not wechsel:
+        gedeckt = min(verr, neu_betrag)
+        if bezahlt + _EPS < gedeckt:
+            raise ZahlungsKonfliktError(
+                f"Dieser Tag ist mit {_eur(gedeckt)} aus einer Auszahlung bezahlt. Er lässt sich deshalb "
+                f"nicht auf „offen“ oder weniger als {_eur(gedeckt)} bezahlt setzen. Um das zu ändern, "
+                f"bitte die Auszahlung im Verlauf rückgängig machen.")
+
+    if neu_betrag > _EPS:
+        ziel = (1, 0.0) if bezahlt >= neu_betrag - _EPS else (0, round(max(bezahlt, 0.0), 2))
+    elif verr > _EPS and unveraendert:
+        # Ein per Auszahlung finanzierter Tag wird 0 €: die Verrechnung geht zurück (Abgleich) und der
+        # Tag gilt als offen — ein altes „bezahlt“ würde nach einer Erhöhung Geld verdoppeln. Der bar
+        # gezahlte Anteil bleibt als Teilzahlung erhalten.
+        ziel = (0, round(max(bezahlt_alt - verr, 0.0), 2))
+    else:
+        ziel = (paid, 0.0 if paid else teil)     # 0-€-Tag (Eigenleistung): Zahlstatus bleibt, wie er ist
+    if "paid" in fields or "paid_amount" in fields or ziel != (alt["paid"], round(alt["paid_amount"] or 0, 2)):
+        fields["paid"], fields["paid_amount"] = ziel
+    return _update_row_in_conn(conn, "time_entries", entry_id, fields), paare
+
+
 def update_time_entry(entry_id: int, fields: dict) -> bool:
-    """Aktualisiert die übergebenen Felder eines Zeiteintrags (person, person_id, hours, hourly_rate, billed, work_date); None leert das Feld."""
-    return _update_row("time_entries", entry_id, fields)
+    """
+    Aktualisiert die übergebenen Felder eines Zeiteintrags (person, person_id, hours, hourly_rate,
+    billed, paid, work_date, travel_cost, paid_amount); None leert das Feld.
+
+    Hält Auszahlung und Guthaben dabei in derselben Transaktion synchron — siehe
+    „Auszahlung/Guthaben-Buchführung“. Wirft ZahlungsKonfliktError, wenn der Zahlstatus unter den
+    per Auszahlung verrechneten Betrag sinken würde.
+    """
+    _validate_update_fields("time_entries", fields)
+    if not fields:
+        return False
+    conn = get_conn()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        with conn:
+            geaendert, paare = _stunde_aendern(conn, entry_id, fields)
+            for pid, person in paare:
+                _guthaben_abgleichen(conn, pid, person)
+        return geaendert
+    finally:
+        conn.close()
 
 
 def person_auszahlung(project_id: int, person: str, amount: float) -> dict:
@@ -1180,10 +1783,10 @@ def person_auszahlung(project_id: int, person: str, amount: float) -> dict:
     """
     conn = get_conn()
     try:
+        conn.execute("BEGIN IMMEDIATE")      # Lesen und Schreiben wirklich in EINER Transaktion
         with conn:
             rows = conn.execute(
-                "SELECT te.* FROM time_entries te "
-                "JOIN tasks t ON t.id = te.task_id JOIN sites s ON s.id = t.site_id "
+                f"SELECT te.*, {_BETRAG_SQL} AS betrag FROM time_entries te {_STUNDE_PROJEKT_JOIN} "
                 "WHERE s.project_id = ? AND lower(te.person) = lower(?) AND te.paid = 0 "
                 "ORDER BY COALESCE(te.work_date, substr(te.created_at, 1, 10)), te.id",
                 (project_id, person.strip()),
@@ -1192,7 +1795,7 @@ def person_auszahlung(project_id: int, person: str, amount: float) -> dict:
                 return {"fehler": f"Keine offenen Stunden von '{person}' in Projekt {project_id}."}
             posten = []
             for r in rows:
-                betrag = round(r["hours"] * r["hourly_rate"] + (r["travel_cost"] or 0), 2)
+                betrag = r["betrag"]
                 offen = round(betrag - (r["paid_amount"] or 0), 2)
                 posten.append((r, betrag, offen))
             gesamt_offen = round(sum(p[2] for p in posten), 2)
@@ -1222,12 +1825,24 @@ def person_auszahlung(project_id: int, person: str, amount: float) -> dict:
 
 
 def delete_time_entry(entry_id: int) -> bool:
-    """Löscht einen Zeiteintrag anhand seiner ID."""
+    """
+    Löscht einen Zeiteintrag anhand seiner ID. Die Auszahlung, die ihn bezahlt hat, wird frei
+    und deckt sofort andere offene Stunden derselben Person (Rest bleibt Guthaben).
+    """
     conn = get_conn()
-    with conn:
-        cur = conn.execute("DELETE FROM time_entries WHERE id = ?", (entry_id,))
-    conn.close()
-    return cur.rowcount > 0
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        with conn:
+            alt = _eintrag_kontext(conn, entry_id)
+            if alt is None:
+                return False
+            # erst freigeben (protokolliert, Rückgängig stellt den Tag ohne Phantom-Zahlung wieder her)
+            _guthaben_freigeben(conn, entry_id, zahlstatus_kuerzen=True)
+            conn.execute("DELETE FROM time_entries WHERE id = ?", (entry_id,))
+            _guthaben_abgleichen(conn, alt["project_id"], alt["person"])
+        return True
+    finally:
+        conn.close()
 
 
 # ---------------------------------------------------------------------------

@@ -82,7 +82,25 @@ def daten(pid: int) -> dict:
 
 
 def betrag_zeit(z) -> float:
-    return round(z["hours"] * z["hourly_rate"] + (z["travel_cost"] or 0), 2)
+    # SQL-ROUND wie in der App und allen Summen: Python-round() rundet exakte Hälften anders
+    # (2,625 → 2,62 statt 2,63) und ließe im PDF einzelne Cent abweichen.
+    c = sqlite3.connect(":memory:")
+    try:
+        return c.execute("SELECT ROUND(? * ? + ?, 2)",
+                         (z["hours"], z["hourly_rate"], z["travel_cost"] or 0)).fetchone()[0]
+    finally:
+        c.close()
+
+
+def arbeit_und_anfahrt(zeiten) -> tuple[float, float]:
+    """
+    Arbeit (ohne Anfahrt) und Anfahrt, so aufgeteilt, dass beides zusammen genau die Summe der
+    Tagesbeträge ergibt. Python-round(Stunden × Satz) + Anfahrt wich bei Viertelstunden × halben
+    Euro-Sätzen um 1 ct von Σ ROUND(Stunden × Satz + Anfahrt) ab, das der Rest der App benutzt.
+    """
+    anfahrt = sum(z["travel_cost"] or 0 for z in zeiten)
+    arbeit = round(sum(betrag_zeit(z) for z in zeiten) - anfahrt, 2)
+    return arbeit, anfahrt
 
 
 def gezahlt(betrag: float, row) -> float:
@@ -172,8 +190,7 @@ def html_bericht(d: dict, fotos: bool, basis_url: str = "") -> str:
         return f'<span class="klein">{text}</span>' 
     zeiten, material = d["zeiten"], d["material"]
 
-    arbeit = sum(round(z["hours"] * z["hourly_rate"], 2) for z in zeiten)
-    anfahrt = sum(z["travel_cost"] or 0 for z in zeiten)
+    arbeit, anfahrt = arbeit_und_anfahrt(zeiten)
     stunden = sum(z["hours"] for z in zeiten)
     mat = sum(round(m["qty"] * m["unit_price"], 2) for m in material)
     gesamt = arbeit + anfahrt + mat
